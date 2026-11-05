@@ -38,7 +38,7 @@
       <section class="card control">
         <div class="hero-head">
           <span class="label">色温</span>
-          <span class="big"><span id="kelvinNum">4500</span><i>K</i></span>
+          <span class="big" id="heroValue"><span id="kelvinNum">4500</span><i>K</i></span>
         </div>
         <input id="kelvin" class="range-temp" type="range" min="1000" max="6500" step="50" />
         <div class="scale"><span>1000 · 暖</span><span>6500 · 中性</span></div>
@@ -96,12 +96,12 @@
           <button id="skip" class="ghost">跳过这次</button>
         </div>
         <div class="row compact">
-          <label class="row-label">休息时调暗</label>
+          <label class="row-label grow">休息时调暗</label>
           <button id="dimScreen" class="switch" role="switch" aria-checked="true" title="休息时把屏幕调暖压暗">
             <span class="knob"></span>
           </button>
-          <span class="muted">屏幕短暂变暖，不看面板也能察觉</span>
         </div>
+        <p class="hint tight">到点时屏幕短暂变暖变暗，不打开面板也能察觉</p>
       </section>
 
       <!-- ------------------------------------------------------------ 曲线 -->

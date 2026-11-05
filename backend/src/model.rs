@@ -517,8 +517,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             enabled: true,
-            preset: "office".to_string(),
-            kelvin: 4500,
+            // 首次装好时保持原色。一打开就把屏幕染暖，用户会以为是装坏了，
+            // 也分不清到底是插件改的还是别的东西改的
+            preset: "off".to_string(),
+            kelvin: 6500,
             brightness: 1.0,
             color: None,
             target: "all".to_string(),

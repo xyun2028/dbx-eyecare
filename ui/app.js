@@ -418,7 +418,7 @@ function render() {
   el("enabled").classList.toggle("on", !!S.enabled);
   el("enabled").setAttribute("aria-checked", String(!!S.enabled));
   el("kelvin").value = S.kelvin;
-  el("kelvinNum").textContent = S.kelvin;
+  renderHero(S.effective);
   el("brightness").value = Math.round(S.brightness * 100);
   el("brightnessVal").textContent = `${Math.round(S.brightness * 100)}%`;
   if (S.color) el("color").value = rgbToHex(S.color);
@@ -512,6 +512,47 @@ function renderTarget() {
   }
 
   sel.value = S.target || "all";
+}
+
+/// 左上角那个大数字。色温模式下是「4500 K」，滤色模式下换成色块加「滤色」。
+/// 不跟着 effective 变的话，用户在滤色预设下看到数字没动，会以为没切过去。
+function renderHero(eff) {
+  const hero = el("heroValue");
+  const slider = el("kelvin");
+
+  if (eff && eff.kind === "rgb") {
+    hero.classList.add("filtered");
+    hero.textContent = "";
+
+    const dot = document.createElement("span");
+    dot.className = "hero-dot";
+    dot.style.background = rgbToHex(eff.rgb);
+
+    const label = document.createElement("i");
+    label.textContent = "滤色";
+
+    hero.append(dot, label);
+    slider.classList.add("dimmed");
+    slider.title = "当前是滤色模式，拖动会切回色温";
+    return;
+  }
+
+  hero.classList.remove("filtered");
+  slider.classList.remove("dimmed");
+  slider.title = "";
+
+  // 结构只在需要时重建，平时只改文字，免得拖动滑杆时反复造节点
+  if (!hero.querySelector("#kelvinNum")) {
+    hero.textContent = "";
+    const num = document.createElement("span");
+    num.id = "kelvinNum";
+    const unit = document.createElement("i");
+    unit.textContent = "K";
+    hero.append(num, unit);
+  }
+
+  const shown = eff && eff.kind === "kelvin" ? eff.kelvin : S.kelvin;
+  hero.querySelector("#kelvinNum").textContent = shown;
 }
 
 function renderPresets() {
@@ -851,7 +892,8 @@ function bind() {
 
   el("kelvin").addEventListener("input", (e) => {
     const v = Number(e.target.value);
-    el("kelvinNum").textContent = v;
+    // 滤色模式下大数字是色块，一拖滑杆就切回色温显示和色温取值
+    renderHero({ kind: "kelvin", kelvin: v });
     debounce(() => send("eyecare/tint", { kelvin: v }));
   });
 

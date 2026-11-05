@@ -17,3 +17,7 @@ Thumbs.db
 
 # CI 下载下来的各平台产物（由 merge-artifacts 合成上架材料）
 /artifacts
+
+# 本地调试产物
+.playwright-cli
+/*.png
