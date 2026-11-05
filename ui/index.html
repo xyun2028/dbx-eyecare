@@ -34,6 +34,7 @@
     <p id="hdrNote" class="note hidden"></p>
 
     <main class="grid">
+      <!-- ------------------------------------------------------------ 手动控制 -->
       <section class="card control">
         <div class="hero-head">
           <span class="label">色温</span>
@@ -62,57 +63,107 @@
         </div>
       </section>
 
+      <!-- -------------------------------------------------------------- 预设 -->
       <section class="card presets-card">
-        <div class="card-head"><h2>预设</h2></div>
+        <div class="card-head">
+          <h2>预设</h2>
+          <button id="savePreset" class="ghost compact">存为预设</button>
+        </div>
+        <div id="presetForm" class="preset-form hidden">
+          <input id="presetName" type="text" maxlength="24" placeholder="给这套配色起个名字" />
+          <button id="presetConfirm" class="ghost">保存</button>
+        </div>
         <div id="presets" class="presets"></div>
       </section>
 
-      <section class="side">
-        <div class="card">
-          <div class="card-head">
-            <h2>按时间自动</h2>
+      <!-- ---------------------------------------------------------- 20-20-20 -->
+      <section class="card break-card">
+        <div class="card-head">
+          <h2>20-20-20</h2>
+          <button id="breakOn" class="switch" role="switch" aria-checked="false" title="休息提醒">
+            <span class="knob"></span>
+          </button>
+        </div>
+        <div class="clock">
+          <span id="breakTime" class="clock-num">20:00</span>
+          <span id="breakCap" class="clock-cap">后提醒休息</span>
+        </div>
+        <div class="bar"><div id="breakBar" class="bar-fill"></div></div>
+        <div class="row compact">
+          <label for="workMinutes">间隔</label>
+          <input id="workMinutes" class="num" type="number" min="1" max="180" step="1" />
+          <span class="unit">分钟</span>
+          <button id="skip" class="ghost">跳过这次</button>
+        </div>
+        <div class="row compact">
+          <label class="row-label">休息时调暗</label>
+          <button id="dimScreen" class="switch" role="switch" aria-checked="true" title="休息时把屏幕调暖压暗">
+            <span class="knob"></span>
+          </button>
+          <span class="muted">屏幕短暂变暖，不看面板也能察觉</span>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------ 曲线 -->
+      <section class="card curve-card">
+        <div class="card-head">
+          <h2>24 小时曲线</h2>
+          <div class="head-tools">
+            <div class="seg" id="modeSeg">
+              <button type="button" data-mode="clock">钟点</button>
+              <button type="button" data-mode="sun">日出日落</button>
+            </div>
             <button id="auto" class="switch" role="switch" aria-checked="false" title="按时间自动">
               <span class="knob"></span>
             </button>
           </div>
-          <div class="row">
-            <span class="dot day"></span>
-            <span class="row-label">白天</span>
-            <input id="dayStart" type="time" />
-            <input id="dayK" class="num" type="number" min="1000" max="6500" step="100" />
-            <span class="unit">K</span>
-          </div>
-          <div class="row">
-            <span class="dot night"></span>
-            <span class="row-label">夜间</span>
-            <input id="nightStart" type="time" />
-            <input id="nightK" class="num" type="number" min="1000" max="6500" step="100" />
-            <span class="unit">K</span>
-          </div>
-          <p class="hint">
-            切换前后 <input id="transition" class="num small" type="number" min="0" max="180" step="10" /> 分钟内过渡
-          </p>
         </div>
 
-        <div class="card">
-          <div class="card-head">
-            <h2>20-20-20</h2>
-            <button id="breakOn" class="switch" role="switch" aria-checked="false" title="休息提醒">
-              <span class="knob"></span>
-            </button>
-          </div>
-          <div class="clock">
-            <span id="breakTime" class="clock-num">20:00</span>
-            <span class="clock-cap">后提醒休息</span>
-          </div>
-          <div class="bar"><div id="breakBar" class="bar-fill"></div></div>
-          <div class="row compact">
-            <label for="workMinutes">间隔</label>
-            <input id="workMinutes" class="num" type="number" min="1" max="180" step="1" />
-            <span class="unit">分钟</span>
-            <button id="skip" class="ghost">跳过这次</button>
-          </div>
+        <div class="curve-wrap">
+          <svg id="curve" viewBox="0 0 720 132" preserveAspectRatio="xMidYMid meet">
+            <g id="curveGrid"></g>
+            <path id="curveArea" class="curve-area" d="" />
+            <path id="curveLine" class="curve-line" d="" />
+            <g id="curveMarks"></g>
+            <line id="curveNow" class="curve-now" x1="0" y1="14" x2="0" y2="116" />
+            <g id="curveDots"></g>
+          </svg>
         </div>
+
+        <div class="curve-foot">
+          <div class="seg small" id="daySeg">
+            <button type="button" data-day="weekday">工作日</button>
+            <button type="button" data-day="weekend">周末</button>
+          </div>
+          <span id="dayNote" class="muted"></span>
+          <label class="hint right">
+            过渡
+            <input id="transition" class="num small" type="number" min="0" max="180" step="10" />
+            分钟
+          </label>
+        </div>
+
+        <div class="anchor-bar">
+          <span class="row-label">选中</span>
+          <input id="anchorTime" type="time" />
+          <input id="anchorK" class="num" type="number" min="1000" max="6500" step="50" />
+          <span class="unit">K</span>
+          <span id="anchorHint" class="muted">点曲线上的圆点选中，拖动可改时间和色温</span>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------ 用眼 -->
+      <section class="card stats-card">
+        <div class="card-head">
+          <h2>用眼</h2>
+          <span id="streakPill" class="pill off">未开始</span>
+        </div>
+        <p class="stats-big">
+          <span id="todayHours">0</span><i>小时</i><span id="todayMins">0</span><i>分</i>
+        </p>
+        <p id="todayMeta" class="muted">今天还没有记录</p>
+        <div id="weekBars" class="week-bars"></div>
+        <p class="muted week-cap">最近七天</p>
       </section>
     </main>
 

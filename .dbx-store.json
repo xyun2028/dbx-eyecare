@@ -1,17 +1,17 @@
 {
   "name": "Eye眼",
-  "description": "Screen color temperature inside DBX: presets, scheduled day/night shifting, and 20-20-20 break reminders. It adjusts the display gamma table instead of overlaying a translucent tint, and works per monitor.",
+  "description": "Screen color temperature inside DBX: an editable 24-hour warmth curve, your own saved presets, sunrise/sunset scheduling, separate weekday and weekend schedules, and 20-20-20 break reminders that briefly dim the screen. It adjusts the display gamma table instead of overlaying a translucent tint, and works per monitor.",
   "icon": "ui/icon.png",
-  "tags": ["eyecare", "color-temperature", "gamma", "health"],
+  "tags": ["eyecare", "color-temperature", "gamma", "health", "presets"],
   "permissions": ["host.workbench", "host.events"],
   "source": "https://github.com/xyun2028/dbx-eyecare",
   "homepage": "https://github.com/xyun2028/dbx-eyecare",
   "license": "MIT",
-  "releaseNotes": "支持 macOS 与 Linux，Intel、Apple Silicon、ARM64 都覆盖：Windows 走 GDI，macOS 走 CoreGraphics，Linux 走 X11/RandR。Wayland 会话下会明确说明不支持，不再让开关看起来生效了其实没改到屏幕。",
+  "releaseNotes": "0.2.0 adds a 24-hour color temperature curve with draggable anchor points, custom presets that keep your own warmth and brightness, sunrise/sunset scheduling computed locally from coordinates, separate weekday and weekend curves, break reminders that briefly dim the screen, and daily screen-time statistics. Schedules from earlier versions are migrated automatically.",
   "localizations": {
     "zh-CN": {
       "name": "Eye眼",
-      "description": "在 DBX 里调屏幕色温：预设、按时段自动切换、20-20-20 休息提醒。直接改显示器的 Gamma 表，不盖半透明遮罩，多块屏可以各调各的。"
+      "description": "在 DBX 里调屏幕色温：一条可以自己拖的 24 小时曲线、自己存的预设、按日出日落自动切换、工作日与周末分开、20-20-20 休息提醒（到点屏幕会短暂变暗）。直接改显示器的 Gamma 表，不盖半透明遮罩，多块屏可以各调各的。"
     }
   }
 }

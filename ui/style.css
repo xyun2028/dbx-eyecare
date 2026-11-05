@@ -172,6 +172,7 @@ h1 {
   color: var(--accent);
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
+  white-space: nowrap;
 }
 
 .pill.off {
@@ -189,14 +190,16 @@ h1 {
   text-overflow: ellipsis;
 }
 
-/* ---------------------------------------------------------------- 三栏 */
+/* ---------------------------------------------------------------- 布局 */
 
 .grid {
   display: grid;
   gap: 12px;
   align-items: stretch;
-  grid-template-columns: minmax(280px, 1.3fr) minmax(210px, 1fr) minmax(230px, 1fr);
-  grid-template-areas: "control presets side";
+  grid-template-columns: minmax(280px, 1.15fr) minmax(212px, 1fr) minmax(228px, 0.9fr);
+  grid-template-areas:
+    "control presets break"
+    "curve curve stats";
 }
 
 .control {
@@ -205,76 +208,47 @@ h1 {
   flex-direction: column;
 }
 
-input[type="color"] {
-  width: 34px;
-  height: 24px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--surface-2);
-  cursor: pointer;
-  flex: none;
-}
-
-input[type="color"]::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-
-input[type="color"]::-webkit-color-swatch {
-  border: none;
-  border-radius: 5px;
-}
-
-.muted {
-  font-size: 11px;
-  color: var(--faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .presets-card {
   grid-area: presets;
   min-width: 0;
 }
 
-.side {
-  grid-area: side;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.break-card {
+  grid-area: break;
   min-width: 0;
 }
 
-@media (max-width: 900px) {
+.curve-card {
+  grid-area: curve;
+  min-width: 0;
+}
+
+.stats-card {
+  grid-area: stats;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 980px) {
   .grid {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
       "control presets"
-      "side side";
-  }
-
-  .side {
-    flex-direction: row;
-  }
-
-  .side > .card {
-    flex: 1;
-    min-width: 0;
+      "break stats"
+      "curve curve";
   }
 }
 
-@media (max-width: 620px) {
+@media (max-width: 660px) {
   .grid {
     grid-template-columns: 1fr;
     grid-template-areas:
       "control"
       "presets"
-      "side";
-  }
-
-  .side {
-    flex-direction: column;
+      "break"
+      "curve"
+      "stats";
   }
 }
 
@@ -303,6 +277,7 @@ h2 {
   font-weight: 500;
   letter-spacing: 1.1px;
   color: var(--label);
+  white-space: nowrap;
 }
 
 .label {
@@ -310,6 +285,55 @@ h2 {
   letter-spacing: 1.1px;
   color: var(--label);
 }
+
+.head-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------ 分段选择 */
+
+.seg {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.seg button {
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11px;
+  font-family: inherit;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seg button:hover {
+  color: var(--text);
+}
+
+.seg button.active {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.seg.small button {
+  font-size: 10.5px;
+  padding: 2px 8px;
+}
+
+.seg.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------- 色温 */
 
 .hero-head {
   display: flex;
@@ -421,6 +445,49 @@ input[type="range"]::-webkit-slider-thumb {
   font-variant-numeric: tabular-nums;
 }
 
+input[type="color"] {
+  width: 34px;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  cursor: pointer;
+  flex: none;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 5px;
+}
+
+.muted {
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.muted.clickable {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.muted.clickable:hover {
+  color: var(--accent);
+}
+
+/* 放在一行里的说明文字要能占满剩下的宽度，否则会被开关挤成两行 */
+.row .muted {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ---------------------------------------------------------------- 预设 */
 
 .presets {
@@ -430,6 +497,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .preset {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
@@ -457,6 +525,10 @@ input[type="range"]::-webkit-slider-thumb {
   background: var(--accent-soft);
 }
 
+.preset.custom {
+  padding-right: 18px;
+}
+
 .sw {
   width: 14px;
   height: 14px;
@@ -478,6 +550,53 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--accent);
 }
 
+.preset-del {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: none;
+}
+
+.preset.custom:hover .preset-del {
+  display: block;
+}
+
+.preset-del:hover {
+  color: var(--accent);
+}
+
+.preset-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.preset-form input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 7px;
+  font-family: inherit;
+  outline: none;
+}
+
+.preset-form input:focus {
+  border-color: var(--accent-line);
+}
+
 /* ---------------------------------------------------------------- 表单 */
 
 .dot {
@@ -485,14 +604,6 @@ input[type="range"]::-webkit-slider-thumb {
   height: 6px;
   border-radius: 50%;
   flex: none;
-}
-
-.dot.day {
-  background: #f0b95e;
-}
-
-.dot.night {
-  background: #7f8ea6;
 }
 
 input[type="time"],
@@ -537,6 +648,11 @@ input.num:focus {
   border-color: var(--accent-line);
 }
 
+input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .unit {
   font-size: 11px;
   color: var(--faint);
@@ -551,6 +667,10 @@ input.num:focus {
   align-items: center;
   gap: 5px;
   flex-wrap: wrap;
+}
+
+.hint.right {
+  margin: 0 0 0 auto;
 }
 
 .clock {
@@ -603,6 +723,191 @@ input.num:focus {
 .ghost:hover {
   border-color: var(--accent-line);
   color: var(--accent);
+}
+
+.ghost.compact {
+  padding: 3px 8px;
+  font-size: 10.5px;
+}
+
+/* ---------------------------------------------------------------- 曲线 */
+
+.curve-wrap {
+  margin-top: 2px;
+}
+
+/* aspect-ratio 让 viewBox 等比缩放：圆点不会因为容器变宽被拉成椭圆 */
+.curve-wrap svg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 720 / 132;
+  touch-action: none;
+}
+
+.curve-area {
+  fill: var(--accent-soft);
+  pointer-events: none;
+}
+
+.curve-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.grid-h,
+.grid-v {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.grid-label {
+  fill: var(--faint);
+  font-size: 9px;
+  font-family: inherit;
+}
+
+.grid-sun {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  opacity: 0.5;
+}
+
+.grid-sun-label {
+  fill: var(--accent);
+  font-size: 9px;
+  font-family: inherit;
+  opacity: 0.85;
+}
+
+.curve-now {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.curve-now.live {
+  opacity: 0.75;
+}
+
+.anchor-dot {
+  fill: var(--surface);
+  stroke: var(--accent);
+  stroke-width: 2;
+  cursor: grab;
+}
+
+.anchor-dot:hover {
+  fill: var(--accent-soft);
+}
+
+.anchor-dot.active {
+  fill: var(--accent);
+}
+
+.anchor-dot.locked {
+  cursor: default;
+  stroke: var(--faint);
+}
+
+.curve-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.curve-foot .muted {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+}
+
+.anchor-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.anchor-bar .muted {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+}
+
+/* ---------------------------------------------------------------- 统计 */
+
+.stats-big {
+  margin: 2px 0 2px;
+  font-size: 30px;
+  font-weight: 300;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-big i {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--faint);
+  margin: 0 6px 0 3px;
+}
+
+.week-bars {
+  display: flex;
+  gap: 5px;
+  margin-top: 12px;
+  flex: 1;
+  min-height: 46px;
+}
+
+.week-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.week-track {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  /* 用最淡的那层当底，没有数据时不会出现七个显眼的空盒子 */
+  background: var(--hover);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.week-fill {
+  width: 100%;
+  background: var(--dim-b);
+  border-radius: 3px;
+  transition: height 0.3s;
+}
+
+.week-col.today .week-fill {
+  background: var(--accent);
+}
+
+.week-day {
+  font-size: 9px;
+  color: var(--faint);
+  text-align: center;
+}
+
+.week-cap {
+  margin: 6px 0 0;
+  font-size: 10px;
 }
 
 /* ---------------------------------------------------------------- 开关 */

@@ -1,6 +1,6 @@
 # Eye眼 · DBX 插件
 
-在 DBX 里直接调屏幕色温，按时段自动切换，每 20 分钟提醒你抬头看远处。
+在 DBX 里直接调屏幕色温，按一天的作息自动变，每 20 分钟提醒你抬头看远处。
 
 桌面版 [eyecare](https://github.com/xyun2028/eyecare) 的引擎被搬进了 DBX：
 调的是显示器的 Gamma 查找表，不是在屏幕上盖一层半透明色板——画面不会发灰，
@@ -25,9 +25,14 @@ GNOME 和 KDE 都不让第三方改 Gamma 表。XWayland 能连上 X，但改的
 ## 功能
 
 - **色温**：1000–6500K 连续调节，配亮度
-- **预设**：原色 / 轻度 / 办公 / 夜间 / 睡前 / 豆沙绿 / 纸质暖黄
-- **按时间自动**：白天与夜间两档色温 + 两个切换时刻，切换前后线性过渡
-- **20-20-20**：每工作 20 分钟提醒一次，休息 20 秒；倒计时就在面板上
+- **预设**：七个内置，加上自己存的任意组合——名字、色温（或滤色）、亮度一起记下来
+- **24 小时曲线**：一天里放多个锚点，每个锚点定一个色温。锚点之间保持不动，
+  临近下一个锚点才按设定的分钟数过渡，屏幕不会一整天都在缓慢变色
+- **日出日落**：填经纬度，按当地太阳时间自动决定什么时候变暖，不用每季度手动改时刻
+- **工作日 / 周末**：两套曲线。周末可以单独设，也可以跟着工作日走
+- **20-20-20**：每工作 20 分钟提醒一次，休息 20 秒。到点屏幕会短暂变暖压暗，
+  不打开面板也能察觉；也可以关掉这个行为，只保留面板里的横幅
+- **用眼记录**：今天亮了多久、休息了几次、最长连续多久，存最近 30 天
 - **逐屏独立**：多显示器可以只调其中一块
 
 ## 为什么是 Gamma，不是遮罩
@@ -48,9 +53,11 @@ ui/                 沙箱前端：只管显示和发 RPC
 backend/            Rust 侧车：stdin/stdout 上行分隔 JSON-RPC 2.0
   src/main.rs       读帧、分发、退出时还原屏幕
   src/rpc.rs        方法表与握手
-  src/state.rs      持久化、备份、把配置写到屏幕上
+  src/state.rs      持久化、备份、把配置写到屏幕上、休息提示
   src/color.rs      色温 → Gamma 表
-  src/model.rs      预设、时段规则、休息计时
+  src/model.rs      预设、24 小时曲线、日出日落规则、休息计时
+  src/sun.rs        本地算日出日落（NOAA 公式，不联网）
+  src/stats.rs      用眼记录
   src/gamma/
     mod.rs          公共的 Ramp 类型、重采样、平台分派
     windows.rs      GDI + DisplayConfig
@@ -76,11 +83,39 @@ const state = await window.dbxPlugin.invoke("eyecare/state", {});
 
 | 方法 | 说明 |
 |---|---|
-| `eyecare/state` | 全量状态：配置、预设、显示器、当前生效的色调、休息倒计时、平台能力 |
+| `eyecare/state` | 全量状态：配置、预设、显示器、当前生效的色调、曲线、日出日落时刻、休息倒计时、用眼统计、平台能力 |
 | `eyecare/config` | 改配置并立即应用（`enabled` / `preset` / `kelvin` / `brightness` / `target` / `schedule`） |
-| `eyecare/preset` | 选一个预设 |
+| `eyecare/preset` | 选一个预设，内置和自定义都走这里 |
+| `eyecare/preset.save` | 把当前的色温（或滤色）和亮度存成自定义预设，可带 `name` |
+| `eyecare/preset.rename` | 改自定义预设的名字 |
+| `eyecare/preset.delete` | 删一个自定义预设 |
 | `eyecare/tint` | 自定义色温或亮度，自动切到 custom |
-| `eyecare/break` | 休息计时：开关、间隔、`action: "skip"` |
+| `eyecare/break` | 休息计时：开关、间隔、`dimScreen`、`action: "skip"` / `"endRest"` |
+
+`schedule` 是这轮改动最大的地方：
+
+```json
+{
+  "enabled": true,
+  "mode": "clock",
+  "points": [{ "at": 420, "kelvin": 5500 }],
+  "weekendPoints": [],
+  "transition": 60,
+  "lat": 22.55,
+  "lon": 114.06,
+  "sunMargin": 40,
+  "effectivePoints": [],
+  "sunTimes": { "sunrise": 402.1, "sunset": 1083.4 }
+}
+```
+
+`at` 是从零点算起的分钟数。`mode` 为 `sun` 时忽略 `points`，按经纬度算出的日出日落
+生成四个锚点；`weekendPoints` 为空表示周末跟工作日一样。`effectivePoints` 和
+`sunTimes` 是只读的，前者是今天实际生效的曲线（日出模式下就是算出来的那四个点），
+后者是当地日出日落时刻，极昼极夜时为 `null`。
+
+老版本只有 `dayKelvin` / `nightKelvin` / `dayStart` / `nightStart` 四个字段。
+读到没有 `points` 的配置时会自动补成两个锚点，所以升级不会丢设置。
 
 `eyecare/state` 里有两个字段是给平台差异用的：
 
@@ -98,7 +133,7 @@ const state = await window.dbxPlugin.invoke("eyecare/state", {});
 侧车推给前端的事件只有一条：
 
 ```
-evt/break.due   { restSeconds, at }
+evt/break.due   { restSeconds, dimScreen, at }
 ```
 
 ## 构建与打包
@@ -143,8 +178,8 @@ node scripts/package.js
 产物在 `dist/`：
 
 ```
-com.eyecare.dbx-0.1.8-windows-x64.dbxp              # 安装包
-com.eyecare.dbx-0.1.8-windows-x64.artifact.json     # target / url / sha256 / size
+com.eyecare.dbx-0.2.0-windows-x64.dbxp              # 安装包
+com.eyecare.dbx-0.2.0-windows-x64.artifact.json     # target / url / sha256 / size
 release-candidates.json                             # 挂到 Release，供商店同步流程读取
 candidates/com.eyecare.dbx.json                     # 提给 dbx-store 的候选文件
 publishers/xyun2028.json                            # 提给 dbx-store 的发布者记录
@@ -193,10 +228,11 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 
 ## 数据落在哪
 
-宿主通过 `DBX_PLUGIN_DATA_DIR` 指定目录，插件在里面放两个文件：
+宿主通过 `DBX_PLUGIN_DATA_DIR` 指定目录，插件在里面放三个文件：
 
 - `config.json` —— 配置
 - `original_ramp.txt` —— 改屏之前拍下的原始 Gamma 表
+- `stats.json` —— 用眼记录，按天存，只保留最近 30 天
 
 第二个是关键。插件被强杀时来不及做任何清理，下次启动发现它还在，
 就先把屏幕还原再继续。没有它，一次崩溃就会让屏幕一直偏色。
@@ -214,8 +250,8 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 
 - Windows 实机：握手返回 `protocolVersion` / `capabilities` / `plugin.id+version`
 - Windows 实机：`eyecare/state` 读出两块 1920×1080 显示器、HDR 状态、7 个预设
-- Windows 实机：写表返回 `ok=true`，退出后屏幕还原；关掉开关写回线性表
-- 色温与滤色的换算、表重采样、备份往返：21 个单元测试
+- Windows 实机：写表返回 `ok=true`；关掉开关写回线性表
+- 色温与滤色的换算、表重采样、备份往返、日出日落、曲线插值、周历切换、用眼累加：44 个单元测试
 - 编译：`x86_64-pc-windows-gnu`（宿主）、`aarch64-pc-windows-msvc`、
   `x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、
   `x86_64-apple-darwin`、`aarch64-apple-darwin` 全部 `cargo check` 通过
@@ -240,8 +276,12 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 - Wayland 会话不支持，会在面板上说明原因
 - macOS 上如果系统开了原彩显示（True Tone）或 Night Shift，会和插件叠加，
   最终效果不是插件单独算出来的那个
-- 预设只能选内置的七个，还不能自己存
-- 退出 DBX 后色温会被还原——插件没有常驻进程
+- 日出日落要自己填经纬度。插件没有定位权限，也不联网，只能按填进去的位置算
+- 曲线上的锚点数量固定（新装五个、从 0.1.x 升级上来两个），这一版只能拖位置和改色温，
+  还不能增删锚点
+- 用眼记录只在插件跑着、并且护眼开关打开时累加；关掉的那段时间不算
+- 侧车正常退出时会把屏幕还原；如果宿主直接结束进程，这一步不会执行，
+  屏幕停在当前颜色上，下次启动靠 `original_ramp.txt` 恢复
 
 ## 许可证
 

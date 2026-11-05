@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "eyecare-sidecar"
-version = "0.1.8"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",

@@ -8,13 +8,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::color::{build_gamma_ramp, build_gamma_ramp_rgb};
 use crate::gamma::{self, Ramp};
-use crate::model::{resolve, Config, Tint};
+use crate::model::{self, resolve, Config, Moment, Tint};
+use crate::stats::Stats;
 
 /// 旧格式：首行版本标记，之后每行 `屏名,768 个数字`。
 const BACKUP_HEADER_V1: &str = "eyecare-dbx-v1";
 /// 新格式：首行版本标记，之后一行 JSON。
 /// 改成 JSON 是因为表长不再固定——Windows 是 256，X11 可能是 1024。
 const BACKUP_HEADER_V2: &str = "eyecare-dbx-v2";
+
+/// 休息提示时把色温压到当前的这个比例，亮度再乘下面那个系数。
+/// 用相对值而不是固定色温，是因为用户本来就在 2700K 时，
+/// 一个固定的 1900K 几乎看不出变化，压三成才有「屏幕变了」的感觉。
+const REST_KELVIN_RATIO: f64 = 0.55;
+const REST_BRIGHTNESS_RATIO: f64 = 0.7;
+/// 滤色模式下没有色温可压，退回这个暖色。
+const REST_FALLBACK_KELVIN: u32 = 1800;
 
 /// 宿主注入的数据目录；没有宿主时退回临时目录，方便本地直接跑。
 pub fn data_root() -> PathBuf {
@@ -35,6 +44,9 @@ pub struct AppState {
     pub config: Mutex<Config>,
     /// 改屏之前拍下的原始表。退出或异常时需要它把屏幕还回去
     pub saved: Mutex<Vec<(String, Ramp)>>,
+    /// 休息提示截止的时间戳。有值且还没到期时，写屏走「休息色」
+    pub rest_until: Mutex<Option<u64>>,
+    pub stats: Mutex<Stats>,
 }
 
 impl AppState {
@@ -44,12 +56,17 @@ impl AppState {
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
 
+        // 旧配置只有 day/night 两档，这里补成锚点；之后所有逻辑只认锚点
+        cfg.normalize();
+
         // 计时开关开着就立刻开始算，否则界面会一直显示「未开始」
         cfg.break_plan.arm();
 
         let state = Self {
             config: Mutex::new(cfg),
             saved: Mutex::new(Vec::new()),
+            rest_until: Mutex::new(None),
+            stats: Mutex::new(Stats::load(&data_root())),
         };
 
         // 上次如果不是干净退出，先把屏幕救回来
@@ -76,8 +93,30 @@ impl AppState {
         }
     }
 
+    pub fn persist_stats(&self) {
+        self.stats.lock().unwrap().save(&data_root());
+    }
+
     pub fn config(&self) -> Config {
         self.config.lock().unwrap().clone()
+    }
+}
+
+/// 开始一次休息提示。到点后由主循环调用。
+pub fn begin_rest(state: &AppState, seconds: u64) {
+    *state.rest_until.lock().unwrap() = Some(model::now_secs() + seconds.max(1));
+}
+
+/// 休息提示是否还在生效。过期的顺手清掉。
+pub fn rest_active(state: &AppState) -> bool {
+    let mut guard = state.rest_until.lock().unwrap();
+    match *guard {
+        Some(until) if model::now_secs() < until => true,
+        Some(_) => {
+            *guard = None;
+            false
+        }
+        None => false,
     }
 }
 
@@ -222,6 +261,23 @@ fn baseline_for(saved: Option<&Ramp>) -> Ramp {
     }
 }
 
+/// 休息提示要把屏幕变成什么样。
+///
+/// 在原来的颜色上再往暖处压一档，而不是换成一个固定值：
+/// 固定值在用户本来就很暖的时候看不出来，在用户很白的时候又太突兀。
+fn rest_tint(tint: Tint, brightness: f64) -> (Tint, f64) {
+    let kelvin = match tint {
+        Tint::Kelvin { kelvin } => (kelvin as f64 * REST_KELVIN_RATIO).round() as u32,
+        Tint::Rgb { .. } => REST_FALLBACK_KELVIN,
+    };
+    (
+        Tint::Kelvin {
+            kelvin: kelvin.clamp(model::KELVIN_MIN, model::KELVIN_MAX),
+        },
+        (brightness * REST_BRIGHTNESS_RATIO).clamp(0.1, 1.0),
+    )
+}
+
 /// 把当前配置写到屏幕上。
 /// 目标是单块屏时，其它屏写回原始值，避免出现「只改了一块、其它还留着上次的颜色」。
 pub fn apply_now(state: &AppState, cfg: &Config) {
@@ -251,7 +307,7 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
 
     let saved = state.saved.lock().unwrap();
 
-    let Some(tint) = resolve(cfg, crate::model::minutes_now()) else {
+    let Some(mut tint) = resolve(cfg, &Moment::now()) else {
         for display in &displays {
             let base = saved
                 .iter()
@@ -267,7 +323,14 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
         return;
     };
 
-    let brightness = cfg.brightness.clamp(0.1, 1.0);
+    let mut brightness = cfg.brightness.clamp(0.1, 1.0);
+    let resting = rest_active(state);
+    if resting {
+        let (next_tint, next_brightness) = rest_tint(tint, brightness);
+        tint = next_tint;
+        brightness = next_brightness;
+    }
+
     for display in displays {
         let targeted = target_all || cfg.target == display.id;
         if targeted {
@@ -281,7 +344,7 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
             crate::protocol::log_line(
                 &data_root(),
                 &format!(
-                    "apply {} tint={tint:?} ok={ok} peak={} len={}",
+                    "apply {} tint={tint:?} ok={ok} resting={resting} peak={} len={}",
                     display.id,
                     ramp.peak(0),
                     ramp.len
@@ -367,5 +430,36 @@ mod tests {
     fn 坏掉的备份不会当成有效数据() {
         let text = format!("{BACKUP_HEADER_V2}\n{{\"displays\":[{{\"id\":\"x\",\"len\":4,\"r\":[1],\"g\":[1],\"b\":[1]}}]}}");
         assert!(parse_backup(&text).is_empty());
+    }
+
+    #[test]
+    fn 休息提示比当前颜色更暖更暗() {
+        let (tint, brightness) = rest_tint(Tint::Kelvin { kelvin: 4500 }, 1.0);
+        match tint {
+            Tint::Kelvin { kelvin } => {
+                assert_eq!(kelvin, 2475, "4500 压到五成半");
+                assert!(kelvin < 4500);
+            }
+            other => panic!("实际 {other:?}"),
+        }
+        assert!(brightness < 0.8, "亮度应压下去，实际 {brightness}");
+    }
+
+    #[test]
+    fn 休息提示不会低于最低色温() {
+        let (tint, _) = rest_tint(Tint::Kelvin { kelvin: 1000 }, 1.0);
+        match tint {
+            Tint::Kelvin { kelvin } => assert_eq!(kelvin, model::KELVIN_MIN),
+            other => panic!("实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 滤色模式下休息提示退回暖色() {
+        let (tint, _) = rest_tint(Tint::Rgb { rgb: [199, 237, 204] }, 1.0);
+        match tint {
+            Tint::Kelvin { kelvin } => assert_eq!(kelvin, REST_FALLBACK_KELVIN),
+            other => panic!("实际 {other:?}"),
+        }
     }
 }
