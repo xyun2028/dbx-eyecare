@@ -44,6 +44,28 @@ const rmrf = (dir) => fs.rmSync(dir, { recursive: true, force: true });
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const writeJson = (file, value) => fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 
+/// 改了 Cargo.toml 的版本号之后，Cargo.lock 里记的还是旧版本，
+/// CLI 的 `cargo build --locked` 会直接拒绝。先在离线模式对齐一次，
+/// 免得每次发版都卡在版本号这种小事上。
+function syncLockFile() {
+  const lock = path.join(ROOT, "backend", "Cargo.lock");
+  const before = fs.readFileSync(lock, "utf8");
+
+  try {
+    execFileSync("cargo", ["metadata", "--format-version", "1", "--offline"], {
+      cwd: path.join(ROOT, "backend"),
+      stdio: "ignore",
+    });
+  } catch {
+    // 离线解析失败一般意味着依赖缓存不全，让后面的打包流程报更具体的错
+    return;
+  }
+
+  if (fs.readFileSync(lock, "utf8") !== before) {
+    console.log("已让 Cargo.lock 跟随 Cargo.toml 的版本");
+  }
+}
+
 /// CLI 以 `cargo build --locked` 编译侧车，并在命令行注入 dbx-plugin-sdk 的 patch。
 /// 我们的侧车没用这个 SDK，patch 就成了「未使用」，Cargo 会想改写锁文件而被 --locked 拒绝。
 /// 锁文件里预先记下这条未使用 patch，两边就都能过。
@@ -86,6 +108,7 @@ function main() {
     : {};
 
   console.log(`打包 ${manifest.name} v${manifest.version}（官方 CLI）`);
+  syncLockFile();
   ensureUnusedPatch();
 
   rmrf(TMP);

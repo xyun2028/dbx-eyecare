@@ -141,8 +141,8 @@ node scripts/package.js
 产物在 `dist/`：
 
 ```
-com.eyecare.dbx-0.2.0-windows-x64.dbxp              # 安装包
-com.eyecare.dbx-0.2.0-windows-x64.artifact.json     # target / url / sha256 / size
+com.eyecare.dbx-0.1.8-windows-x64.dbxp              # 安装包
+com.eyecare.dbx-0.1.8-windows-x64.artifact.json     # target / url / sha256 / size
 release-candidates.json                             # 挂到 Release，供商店同步流程读取
 candidates/com.eyecare.dbx.json                     # 提给 dbx-store 的候选文件
 publishers/xyun2028.json                            # 提给 dbx-store 的发布者记录
@@ -151,11 +151,24 @@ publishers/xyun2028.json                            # 提给 dbx-store 的发布
 不同平台的包文件名不同，会并排放在 `dist/` 里；两份上架文件里的 `artifacts` / `targets`
 数组也会合并，所以一台机器打一次就能凑齐一份完整的多平台候选。
 
+换机器打包时，把 `dist/candidates/` 和 `dist/release-candidates.json` 一起带过去：
+脚本是在已有文件上追加，不会重建。否则在 Mac 上打出来的候选只含 darwin，会盖掉
+Windows 那一条。
+
 测试（不涉及打包，普通 cargo 即可）：
 
 ```bash
 cargo test --manifest-path backend/Cargo.toml
 ```
+
+出包之后自检一遍上架材料：
+
+```bash
+node scripts/check-listing.js
+```
+
+它按 dbx-store 的 candidate schema 检查字段（必填项、id/版本格式、URL 必须 https、
+sha256 长度、产物大小上限），两份上架文件格式不同，所以分开校验。
 
 ## 发布到官方商店
 
