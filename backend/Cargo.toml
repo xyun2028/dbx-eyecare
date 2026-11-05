@@ -1,6 +1,6 @@
 [package]
 name = "eyecare-sidecar"
-version = "0.1.5"
+version = "0.2.0"
 edition = "2021"
 
 [[bin]]
@@ -19,3 +19,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_ColorSystem",
     "Win32_Devices_Display",
 ] }
+
+# 纯 Rust 的 X11 实现，不链接 libX11/libXrandr。
+# 这样交叉编译 linux-arm64 时不需要目标平台的开发包头文件。
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.14", default-features = false, features = ["randr"] }

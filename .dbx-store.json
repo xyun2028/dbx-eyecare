@@ -7,7 +7,7 @@
   "source": "https://github.com/xyun2028/dbx-eyecare",
   "homepage": "https://github.com/xyun2028/dbx-eyecare#readme",
   "license": "MIT",
-  "releaseNotes": "界面跟随 DBX 的浅色/深色主题，切主题即时生效；配色改用宿主的 --color-* 设计变量。",
+  "releaseNotes": "支持 macOS 与 Linux，Intel、Apple Silicon、ARM64 都覆盖：Windows 走 GDI，macOS 走 CoreGraphics，Linux 走 X11/RandR。Wayland 会话下会明确说明不支持，不再让开关看起来生效了其实没改到屏幕。",
   "localizations": {
     "en": {
       "description": "Screen color temperature for DBX: presets, scheduled day/night shifting, and 20-20-20 break reminders. Adjusts the display gamma table instead of overlaying a translucent tint, and works per monitor."

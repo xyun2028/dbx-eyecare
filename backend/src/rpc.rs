@@ -37,6 +37,9 @@ fn state_payload(state: &AppState) -> Value {
     let cfg = state.config();
     let displays = gamma::list();
     let effective = resolve(&cfg, minutes_now());
+    // 平台能不能真的改屏幕，由 gamma 层判断：Windows 总是可以，
+    // Linux 要看是不是 Wayland，macOS 要看有没有图形会话。
+    let support = gamma::capability();
 
     json!({
         "enabled": cfg.enabled,
@@ -56,6 +59,8 @@ fn state_payload(state: &AppState) -> Value {
             "remainingSeconds": cfg.break_plan.remaining(),
         },
         "platform": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "support": support,
         "mock": false,
     })
 }

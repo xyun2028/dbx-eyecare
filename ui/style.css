@@ -86,6 +86,12 @@ body {
   line-height: 1.45;
 }
 
+/* 平台本身改不了屏幕时用，比 HDR 提示更重一点 */
+.note.blocked {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 /* ---------------------------------------------------------------- 头部 */
 
 .banner {

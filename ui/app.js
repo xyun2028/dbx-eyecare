@@ -89,6 +89,9 @@ function mockHost() {
         : null,
     },
     mock: true,
+    platform: "mock",
+    arch: "mock",
+    support: { available: true, session: "mock", reason: null },
   });
 
   return {
@@ -240,9 +243,25 @@ function render() {
   setSwitch("breakOn", !!S.break.enabled);
   el("workMinutes").value = S.break.workMinutes;
 
+  renderSupportNote();
   renderTarget();
   renderPresets();
   renderHdrNote();
+}
+
+/// 平台本身改不了屏幕时，先把原因说清楚，再让用户去拖滑杆。
+/// 否则「拖了没反应」会被当成 bug，其实可能是 Wayland 或者没有图形会话。
+function renderSupportNote() {
+  const note = el("supportNote");
+  const support = S.support;
+
+  if (!support || support.available) {
+    note.classList.add("hidden");
+    return;
+  }
+
+  note.textContent = support.reason || "当前平台无法调整屏幕色温。";
+  note.classList.remove("hidden");
 }
 
 /// HDR 开着时 Windows 会绕过 Gamma 表，调整写了也是白写。
