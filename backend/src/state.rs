@@ -82,7 +82,8 @@ pub fn snapshot() -> Vec<(String, [u16; 768])> {
 
 pub fn restore_all(saved: &[(String, [u16; 768])]) {
     for (id, ramp) in saved {
-        gamma::write_ramp(id, ramp);
+        // 备份也可能本身就是偏的（上一轮遗留），统一走同一套判定
+        gamma::write_ramp(id, &baseline_for(Some(ramp)));
     }
 }
 
@@ -136,22 +137,57 @@ pub fn clear_backup() {
     let _ = fs::remove_file(backup_path());
 }
 
+/// 不做任何调整时的线性表。
+fn identity_ramp() -> [u16; 768] {
+    let mut ramp = [0u16; 768];
+    for ch in 0..3 {
+        for i in 0..256usize {
+            ramp[ch * 256 + i] = (i as f64 / 255.0 * 65535.0).round() as u16;
+        }
+    }
+    ramp
+}
+
+/// 「关闭 / 恢复原色」时到底该写什么。
+///
+/// 直接用启动时抓到的表是不行的：如果那一刻屏幕已经被染过色（比如上一轮
+/// 自己写的，或者别的护眼软件在跑），抓到的「原色」本身就是偏的，写回去
+/// 等于没关——表现就是开关点了没反应。
+///
+/// 判据：真正的原始表或校色配置，三个通道的峰值都是 65535；被降色温或滤色
+/// 压过的表，峰值一定低于 65535。所以峰值为满才敢沿用，否则写线性表。
+fn baseline_for(saved: Option<&[u16; 768]>) -> [u16; 768] {
+    match saved {
+        Some(ramp) if ramp[255] == 65535 && ramp[511] == 65535 && ramp[767] == 65535 => *ramp,
+        _ => identity_ramp(),
+    }
+}
+
 /// 把当前配置写到屏幕上。
 /// 目标是单块屏时，其它屏写回原始值，避免出现「只改了一块、其它还留着上次的颜色」。
 pub fn apply_now(state: &AppState, cfg: &Config) {
-    let Some(tint) = resolve(cfg, crate::model::minutes_now()) else {
-        restore_all(&state.saved.lock().unwrap());
-        return;
-    };
-
-    let saved = state.saved.lock().unwrap();
-    let brightness = cfg.brightness.clamp(0.1, 1.0);
     let displays = gamma::list();
     if displays.is_empty() {
         crate::protocol::log_line(&data_root(), "apply: 没有枚举到显示器");
         return;
     }
 
+    let saved = state.saved.lock().unwrap();
+
+    let Some(tint) = resolve(cfg, crate::model::minutes_now()) else {
+        for display in &displays {
+            let base = saved.iter().find(|(id, _)| id == &display.id).map(|(_, ramps)| ramps);
+            let ramp = baseline_for(base);
+            let ok = gamma::write_ramp(&display.id, &ramp);
+            crate::protocol::log_line(
+                &data_root(),
+                &format!("restore {} ok={ok} peak={}", display.id, ramp[255]),
+            );
+        }
+        return;
+    };
+
+    let brightness = cfg.brightness.clamp(0.1, 1.0);
     for display in displays {
         let targeted = cfg.target == "all" || cfg.target == display.id;
         if targeted {
@@ -165,7 +201,35 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
                 &format!("apply {} tint={tint:?} ok={ok} peak={}", display.id, ramp[255]),
             );
         } else if let Some((_, original)) = saved.iter().find(|(id, _)| id == &display.id) {
-            gamma::write_ramp(&display.id, original);
+            gamma::write_ramp(&display.id, &baseline_for(Some(original)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 被染过色的备份不会被当成原色写回去() {
+        let mut ramp = identity_ramp();
+        ramp[255] = 51143;
+        ramp[511] = 60909;
+        ramp[767] = 52428;
+
+        let base = baseline_for(Some(&ramp));
+        assert_eq!(base[255], 65535, "峰值不满，应判定为污染并改写线性表");
+        assert_eq!(base[511], 65535);
+    }
+
+    #[test]
+    fn 峰值为满的表原样沿用() {
+        let ramp = identity_ramp();
+        assert_eq!(baseline_for(Some(&ramp)), ramp);
+    }
+
+    #[test]
+    fn 没有备份时写线性表() {
+        assert_eq!(baseline_for(None), identity_ramp());
     }
 }
