@@ -14,3 +14,6 @@
 
 Thumbs.db
 .DS_Store
+
+# CI 下载下来的各平台产物（由 merge-artifacts 合成上架材料）
+/artifacts

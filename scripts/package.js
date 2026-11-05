@@ -19,6 +19,8 @@ const path = require("path");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 
+const { buildCandidate, buildRelease, mergeTarget } = require("./listing");
+
 const ROOT = path.resolve(__dirname, "..");
 const DIST = path.join(ROOT, "dist");
 const TMP = path.join(os.homedir(), "dbxpack-tmp");
@@ -93,14 +95,6 @@ function pruneDist(manifest, version, target) {
   }
 }
 
-/// 把本次产物合并进去，其它平台原样保留。
-function mergeTargets(list, target, entry) {
-  const merged = (list || []).filter((item) => item.target !== target);
-  merged.push(entry);
-  merged.sort((a, b) => a.target.localeCompare(b.target));
-  return merged;
-}
-
 function main() {
   const manifest = readJson(path.join(ROOT, "manifest.json"));
   const storeMeta = fs.existsSync(path.join(ROOT, ".dbx-store.json"))
@@ -159,24 +153,14 @@ function main() {
     existingRel.plugin?.id === manifest.id &&
     existingRel.plugin?.version === version;
 
-  const artifacts = mergeTargets(sameRelease ? existingRel.artifacts : [], target, {
+  const artifacts = mergeTarget(sameRelease ? existingRel.artifacts : [], {
     target,
     url,
     sha256: artifact.sha256,
     size: artifact.size,
   });
 
-  writeJson(relPath, {
-    plugin: {
-      id: manifest.id,
-      publisher: manifest.publisher,
-      version,
-      name: manifest.name,
-      description: storeMeta.localizations?.en?.description || storeMeta.description || manifest.description,
-      permissions: manifest.permissions,
-    },
-    artifacts,
-  });
+  writeJson(relPath, buildRelease({ manifest, store: storeMeta, artifacts }));
 
   const candidatePath = path.join(DIST, "candidates", `${manifest.id}.json`);
   const existingCandidate = fs.existsSync(candidatePath) ? readJson(candidatePath) : null;
@@ -185,30 +169,21 @@ function main() {
     existingCandidate.id === manifest.id &&
     existingCandidate.version === version;
 
-  const targets = mergeTargets(sameCandidate ? existingCandidate.targets : [], target, {
+  const targets = mergeTarget(sameCandidate ? existingCandidate.targets : [], {
     target,
     url,
     sha256: artifact.sha256,
     size: artifact.size,
   });
 
-  const candidate = {
-    schemaVersion: 1,
-    id: manifest.id,
-    publisher: manifest.publisher,
-    version,
-    name: manifest.name,
-    description: storeMeta.description,
-    icon: `${RAW}/${tag}/${manifest.icon}`,
-    tags: storeMeta.tags || [],
-    permissions: manifest.permissions,
-    source: `${REPO}/tree/${tag}`,
-    homepage: manifest.homepage,
-    license: storeMeta.license || "MIT",
-    releaseNotes: storeMeta.releaseNotes || "",
-    localizations: storeMeta.localizations || {},
-    targets,
-  };
+  const candidate = buildCandidate({
+    manifest,
+    store: storeMeta,
+    artifacts: targets,
+    repo: REPO,
+    rawBase: RAW,
+    tag,
+  });
 
   fs.mkdirSync(path.join(DIST, "candidates"), { recursive: true });
   fs.mkdirSync(path.join(DIST, "publishers"), { recursive: true });

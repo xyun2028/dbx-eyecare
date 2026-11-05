@@ -67,3 +67,35 @@ jobs:
             dist/*.dbxp
             dist/*.artifact.json
           if-no-files-found: error
+
+  # 五个平台都打完之后，合成一份完整的上架材料。
+  # 官方 CLI 不允许跨平台打包，所以「一次出全」只能这么做。
+  merge:
+    name: 合并上架材料
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 合成
+        run: node scripts/merge-artifacts.js
+
+      - name: 上传上架材料
+        uses: actions/upload-artifact@v4
+        with:
+          name: listing
+          path: |
+            dist/*.dbxp
+            dist/*.artifact.json
+            dist/release-candidates.json
+            dist/candidates/**
+            dist/publishers/**
+          if-no-files-found: error

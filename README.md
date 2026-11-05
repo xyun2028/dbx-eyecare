@@ -129,7 +129,9 @@ node scripts/package.js
 
 仓库里带了一份 GitHub Actions 工作流（`.github/workflows/build.yml`），
 矩阵覆盖 Windows x64、macOS x64/arm64、Linux x64/arm64，各平台原生构建并跑单测。
-它只上传产物，不自动发 Release。
+等五个平台都打完，最后一个 job 会把它们合成一份完整的上架材料（artifact 名 `listing`），
+下载下来就是可以直接提 PR 的 `candidates/<id>.json` 和挂 Release 的
+`release-candidates.json`。它不自动发 Release。
 
 `.dbxp` 本质是 zip 容器，宿主认的是文件名：`<plugin-id>-<version>-<target>.dbxp`。
 清单里的 `backend.executable` 指向 `bin/<target>/<binary>`，由 CLI 按目标平台写入。
