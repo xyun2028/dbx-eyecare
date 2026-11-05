@@ -64,19 +64,33 @@ const state = await window.dbxPlugin.invoke("eyecare/state", {});
 evt/break.due   { restSeconds, at }
 ```
 
-## 构建
+## 构建与打包
 
 ```bash
-cargo build --release --manifest-path backend/Cargo.toml
-
-# 侧车要按平台放进包内目录，宿主不会帮你补路径，也不会补 .exe
-mkdir -p bin/windows-x64
-cp backend/target/release/eyecare-sidecar.exe bin/windows-x64/
+node scripts/package.js                    # 构建 release 并打成可安装的 zip
+node scripts/package.js --skip-build       # 复用已有的 release 产物
+node scripts/package.js --target linux-x64 # 指定目标平台
 ```
 
-`manifest.json` 里的 `entrypoints.backend.executable` 已经写成了 Windows 的包内路径。
-换平台打包时要把这一段改掉（macOS / Linux 没有 `.exe`，目录名也要换）。
-目前还没写打包脚本，这一步是手工的。
+脚本做四件事：
+
+1. 把 `manifest.json` 的 `backend.executable` 重写成包内真实路径（`bin/<target>/<binary>`）
+2. 生成 `checksums.json`，用 sha256 精确覆盖除自身外的所有文件
+3. 按 Unix 权限位压 zip：`bin/` 下 755，其余 644，`version-made-by` 标为 Unix
+4. **重新打开 zip 自检**：文件集合是否与 checksums 完全一致、侧车有没有执行位、
+   manifest 指向的文件是否真的存在
+
+自检不过就直接非零退出。这三条是宿主安装器的硬约定，不满足只会得到一句
+incompatible，不会有任何解释，所以宁可在本地拦住。
+
+产物在 `dist/`：
+
+```
+dbx-eyecare-0.1.0-windows-x64.zip
+dbx-eyecare-0.1.0-windows-x64.artifact.json   # size / sha256
+```
+
+测试：
 
 ```bash
 cargo test --manifest-path backend/Cargo.toml
@@ -105,7 +119,8 @@ cargo test --manifest-path backend/Cargo.toml
 
 - **没有在真实 DBX 宿主里加载过**。宿主侧的事件形状、`manifest.json` 的字段、
   侧车首帧格式以实际表现为准，这里按 DBX 插件规范实现，可能有出入。
-- 打包脚本未写，`entrypoints` 的路径需要手工改
+- 打包脚本只在 Windows 上跑过；`--target linux-x64` 会照常出包，但 Linux 侧的侧车还是空壳
+- 没有签名。未签名包需要在插件中心打开「允许安装未签名开发包」才能装
 - HDR 开启时 Gamma 表会被系统绕过，界面上暂时只是不生效，没有提示
 - 只有 Windows 实现；macOS / Linux 的后端是空壳，编译能过但没有功能
 
