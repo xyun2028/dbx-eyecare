@@ -7,7 +7,7 @@
   "source": "https://github.com/xyun2028/dbx-eyecare",
   "homepage": "https://github.com/xyun2028/dbx-eyecare#readme",
   "license": "MIT",
-  "releaseNotes": "首个版本：色温与亮度调节、7 个内置预设、按时间自动切换、20-20-20 休息提醒、逐屏独立。",
+  "releaseNotes": "界面跟随 DBX 的浅色/深色主题，切主题即时生效；配色改用宿主的 --color-* 设计变量。",
   "localizations": {
     "en": {
       "description": "Screen color temperature for DBX: presets, scheduled day/night shifting, and 20-20-20 break reminders. Adjusts the display gamma table instead of overlaying a translucent tint, and works per monitor."

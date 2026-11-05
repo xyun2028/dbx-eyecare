@@ -431,18 +431,61 @@ function bind() {
 
 /* ---------------------------------------------------------------- 启动 */
 
-function applyTheme() {
-  let theme = window.dbxPlugin?.theme;
+const APPEARANCES = new Set(["light", "dark"]);
+
+// DBX 传下来的 theme 是 { appearance, tokens }，不是字符串；老宿主才可能直接给字符串
+function readAppearance(theme) {
   if (typeof theme === "function") theme = theme();
-  const dark =
-    theme === "dark" ||
-    (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  if (typeof theme === "string") return APPEARANCES.has(theme) ? theme : null;
+  const appearance = theme?.appearance;
+  return APPEARANCES.has(appearance) ? appearance : null;
+}
+
+// 宿主最近一次推下来的外观。有了它就不要再回读 plugin.theme——
+// 那个字段只在初始化时给一次，切主题走的是事件，回读会拿到旧值。
+let knownAppearance = null;
+
+// 以宿主为准，宿主没给才退回系统设置——之前的 bug 就是这里看反了，
+// 明明 DBX 是浅色，却因为 Windows 是深色把面板染成了深色
+function currentAppearance() {
+  return (
+    knownAppearance ||
+    readAppearance(window.dbxPlugin?.theme) ||
+    readAppearance(document.documentElement.dataset.dbxTheme) ||
+    (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+  );
+}
+
+function applyTheme(appearance) {
+  const next = appearance || currentAppearance();
+  knownAppearance = next;
+  // color-scheme 交给 CSS 的 :root / [data-theme="light"] 管，这里只切属性
+  document.documentElement.dataset.theme = next;
+}
+
+function watchTheme() {
+  // 宿主切主题时派发 dbx-plugin-env：正式宿主派在 document 上，开发宿主派在 window 上
+  const onEnv = (event) => {
+    const detail = event?.detail || {};
+    const next = readAppearance(detail.theme) || readAppearance(detail.appearance);
+    if (next) applyTheme(next);
+  };
+  document.addEventListener("dbx-plugin-env", onEnv);
+  window.addEventListener("dbx-plugin-env", onEnv);
+
+  // 没有宿主时（浏览器直接打开）跟着系统走
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (readAppearance(window.dbxPlugin?.theme)) return;
+    knownAppearance = null;
+    applyTheme(null);
+  });
 }
 
 async function boot() {
-  applyTheme();
   api = await connectHost();
+  // 等握手完再读一次：theme 是在 init 消息里带过来的，早读会读到空值
+  applyTheme();
+  watchTheme();
 
   const tag = el("hostMode");
   tag.textContent = api.mode === "real" ? "DBX" : "MOCK";

@@ -1,16 +1,20 @@
+/* 颜色优先用宿主注入的 DBX 设计变量（--color-*），拿不到才退回自带配色。
+   两个块只提供「没有变量时」的暗/亮兜底；变量存在时以 DBX 为准。 */
 :root {
+  color-scheme: dark;
+
   --bg: transparent;
-  --surface: #1b2027;
-  --surface-2: #141920;
-  --line: rgba(255, 255, 255, 0.07);
+  --surface: var(--color-card, #1b2027);
+  --surface-2: var(--color-muted, #141920);
+  --line: var(--color-border, rgba(255, 255, 255, 0.07));
   --line-strong: rgba(255, 255, 255, 0.16);
-  --text: #e8ecf3;
-  --text-soft: #c4ccd8;
-  --dim: #9aa3b2;
-  --faint: #6b7482;
-  --label: #7b8494;
+  --text: var(--color-foreground, #e8ecf3);
+  --text-soft: color-mix(in srgb, var(--color-foreground, #c4ccd8) 84%, transparent);
+  --dim: var(--color-muted-foreground, #9aa3b2);
+  --faint: var(--color-muted-foreground, #6b7482);
+  --label: var(--color-muted-foreground, #7b8494);
   --hover: rgba(255, 255, 255, 0.05);
-  --track: #2a3039;
+  --track: var(--color-muted, #2a3039);
   --knob: #b9c1cd;
   --dim-a: #1c222b;
   --dim-b: #4d5766;
@@ -22,17 +26,19 @@
 }
 
 :root[data-theme="light"] {
-  --surface: #ffffff;
-  --surface-2: #f5f7f6;
-  --line: rgba(20, 32, 28, 0.09);
+  color-scheme: light;
+
+  --surface: var(--color-card, #ffffff);
+  --surface-2: var(--color-muted, #f5f7f6);
+  --line: var(--color-border, rgba(20, 32, 28, 0.09));
   --line-strong: rgba(20, 32, 28, 0.18);
-  --text: #1c2226;
-  --text-soft: #47505a;
-  --dim: #5c6570;
-  --faint: #8b939d;
-  --label: #8b939d;
+  --text: var(--color-foreground, #1c2226);
+  --text-soft: color-mix(in srgb, var(--color-foreground, #47505a) 84%, transparent);
+  --dim: var(--color-muted-foreground, #5c6570);
+  --faint: var(--color-muted-foreground, #8b939d);
+  --label: var(--color-muted-foreground, #8b939d);
   --hover: rgba(20, 32, 28, 0.05);
-  --track: #e3e7e6;
+  --track: var(--color-muted, #e3e7e6);
   --knob: #ffffff;
   --dim-a: #e7eae9;
   --dim-b: #c9cecd;
