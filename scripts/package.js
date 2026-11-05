@@ -254,7 +254,8 @@ function main() {
   }));
 
   fs.mkdirSync(DIST, { recursive: true });
-  const pkgName = `dbx-eyecare-${manifest.version}-${TARGET}.zip`;
+  // 宿主认的是 .dbxp（本质是 zip），文件名用插件 id，不是显示名
+  const pkgName = `${manifest.id}-${manifest.version}-${TARGET}.dbxp`;
   const pkgPath = path.join(DIST, pkgName);
   writeZip(entries, pkgPath);
 
@@ -281,15 +282,17 @@ function main() {
   }
 
   const stat = fs.statSync(pkgPath);
+  // 字段与官方商店的 artifact 清单对齐
   const artifact = {
-    id: staged.id,
-    version: staged.version,
     target: TARGET,
-    file: pkgName,
-    size: stat.size,
+    url: pkgName,
     sha256: sha256(pkgPath),
+    size: stat.size,
   };
-  fs.writeFileSync(pkgPath.replace(/\.zip$/, ".artifact.json"), JSON.stringify(artifact, null, 2) + "\n");
+  fs.writeFileSync(
+    pkgPath.replace(/\.dbxp$/, ".artifact.json"),
+    JSON.stringify(artifact, null, 2) + "\n"
+  );
 
   console.log("\n打包完成");
   console.log(`  文件    ${pkgName}`);

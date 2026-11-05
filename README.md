@@ -67,17 +67,20 @@ evt/break.due   { restSeconds, at }
 ## 构建与打包
 
 ```bash
-node scripts/package.js                    # 构建 release 并打成可安装的 zip
+node scripts/package.js                    # 构建 release 并打成 .dbxp
 node scripts/package.js --skip-build       # 复用已有的 release 产物
 node scripts/package.js --target linux-x64 # 指定目标平台
 ```
+
+产物是 `.dbxp`——本质是个 zip 容器，换扩展名而已，宿主按这个名字认。
+文件名用插件 id 而不是显示名：`<id>-<version>-<target>.dbxp`。
 
 脚本做四件事：
 
 1. 把 `manifest.json` 的 `backend.executable` 重写成包内真实路径（`bin/<target>/<binary>`）
 2. 生成 `checksums.json`，用 sha256 精确覆盖除自身外的所有文件
-3. 按 Unix 权限位压 zip：`bin/` 下 755，其余 644，`version-made-by` 标为 Unix
-4. **重新打开 zip 自检**：文件集合是否与 checksums 完全一致、侧车有没有执行位、
+3. 按 Unix 权限位压包：`bin/` 下 755，其余 644，`version-made-by` 标为 Unix
+4. **重新打开包自检**：文件集合是否与 checksums 完全一致、侧车有没有执行位、
    manifest 指向的文件是否真的存在
 
 自检不过就直接非零退出。这三条是宿主安装器的硬约定，不满足只会得到一句
@@ -86,8 +89,8 @@ incompatible，不会有任何解释，所以宁可在本地拦住。
 产物在 `dist/`：
 
 ```
-dbx-eyecare-0.1.0-windows-x64.zip
-dbx-eyecare-0.1.0-windows-x64.artifact.json   # size / sha256
+com.eyecare.dbx-0.1.0-windows-x64.dbxp
+com.eyecare.dbx-0.1.0-windows-x64.artifact.json   # target / url / sha256 / size
 ```
 
 测试：
