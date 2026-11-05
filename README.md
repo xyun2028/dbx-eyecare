@@ -66,25 +66,32 @@ evt/break.due   { restSeconds, at }
 
 ## 构建与打包
 
+打包用的是官方 CLI，先装一次：
+
 ```bash
-node scripts/package.js                    # 构建 release 并打成 .dbxp
-node scripts/package.js --skip-build       # 复用已有的 release 产物
-node scripts/package.js --target linux-x64 # 指定目标平台
+npm install --global @dbx-app/plugin-cli
 ```
 
-产物是 `.dbxp`——本质是个 zip 容器，换扩展名而已，宿主按这个名字认。
-文件名用插件 id 而不是显示名：`<id>-<version>-<target>.dbxp`。
+然后：
 
-脚本做四件事：
+```bash
+node scripts/package.js                     # 调官方 CLI 出包，并生成上架文件
+node scripts/package.js --target linux-x64  # 指定目标平台
+```
 
-1. 把 `manifest.json` 的 `backend.executable` 重写成包内真实路径（`bin/<target>/<binary>`）
-2. 生成 `checksums.json`，用 sha256 精确覆盖除自身外的所有文件
-3. 按 Unix 权限位压包：`bin/` 下 755，其余 644，`version-made-by` 标为 Unix
-4. **重新打开包自检**：文件集合是否与 checksums 完全一致、侧车有没有执行位、
-   manifest 指向的文件是否真的存在
+脚本本身不拼 zip，它做三件事：
 
-自检不过就直接非零退出。这三条是宿主安装器的硬约定，不满足只会得到一句
-incompatible，不会有任何解释，所以宁可在本地拦住。
+1. 保证 `backend/Cargo.lock` 里有 CLI 注入 `dbx-plugin-sdk` patch 所需的记录
+   （我们的侧车没用这个 SDK，patch 属于「未使用」，不记下来 `--locked` 会直接失败）
+2. 调 `dbx-plugin package` 出 `.dbxp` 和 artifact，收进 `dist/`
+3. 生成 `release-candidates.json`、`candidates/`、`publishers/` 三份上架文件
+
+`.dbxp` 本质是 zip 容器，宿主认的是文件名：`<plugin-id>-<version>-<target>.dbxp`。
+清单里的 `backend.executable` 指向 `bin/<target>/<binary>`，由 CLI 按目标平台写入。
+
+> **Windows 上的坑**：CLI 默认把构建目录放在输出目录里。如果输出目录在工程内（路径较深），
+> MinGW 链接器会找不到 build script 的目标文件。所以脚本改用 `~/dbxpack-tmp` 作为临时输出，
+> 出包后再挪进 `dist/`。官方模板在同样的环境里也会失败，属于工具链问题。
 
 产物在 `dist/`：
 
@@ -96,11 +103,12 @@ candidates/com.eyecare.dbx.json                     # 提给 dbx-store 的候选
 publishers/xyun2028.json                            # 提给 dbx-store 的发布者记录
 ```
 
-测试：
+测试（不涉及打包，普通 cargo 即可）：
 
 ```bash
 cargo test --manifest-path backend/Cargo.toml
 ```
+
 
 ## 发布到官方商店
 

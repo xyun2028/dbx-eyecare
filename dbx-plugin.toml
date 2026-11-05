@@ -1,24 +1,17 @@
-# 构建配置
+# DBX 插件构建配置
 #
-# 注意：含 sidecar 的插件必须按平台分别发包，纯 universal 包不可用。
-# 打包脚本需按目标平台改写 manifest.entrypoints.backend.executable：
-#   windows-*  -> bin/windows-x64/eyecare-sidecar.exe
-#   darwin/*   -> bin/<target>/eyecare-sidecar
+# 字段以官方 CLI（@dbx-app/plugin-cli）为准，由它负责：
+#   编译 backend/ 的 Rust 侧车 → 放进 bin/<target>/ → 写 manifest 的 executable →
+#   生成 checksums.json → 按 Unix 权限位打 .dbxp
+#
+# 所以这里不要再手写 include 里的 manifest.json 和 bin/，CLI 自己会加。
 
-include = [
-  "manifest.json",
-  "ui/**",
-  "bin/**",
-]
+schema_version = 1
 
-exclude = [
-  "backend/**",
-  "docs/**",
-  "scripts/**",
-  "target/**",
-  "dist/**",
-]
+[backend]
+language = "rust"
+directory = "backend"
+binary = "eyecare-sidecar"
 
-[dev]
-# 先把 sidecar 构建到 bin/，再交给宿主加载
-build = ["cargo", "build", "--release", "--manifest-path", "backend/Cargo.toml"]
+[package]
+include = ["ui"]
