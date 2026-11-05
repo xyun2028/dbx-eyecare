@@ -146,15 +146,24 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
 
     let saved = state.saved.lock().unwrap();
     let brightness = cfg.brightness.clamp(0.1, 1.0);
+    let displays = gamma::list();
+    if displays.is_empty() {
+        crate::protocol::log_line(&data_root(), "apply: 没有枚举到显示器");
+        return;
+    }
 
-    for display in gamma::list() {
+    for display in displays {
         let targeted = cfg.target == "all" || cfg.target == display.id;
         if targeted {
             let ramp = match tint {
                 Tint::Kelvin { kelvin } => build_gamma_ramp(kelvin, brightness),
                 Tint::Rgb { rgb } => build_gamma_ramp_rgb(rgb, brightness),
             };
-            gamma::write_ramp(&display.id, &ramp);
+            let ok = gamma::write_ramp(&display.id, &ramp);
+            crate::protocol::log_line(
+                &data_root(),
+                &format!("apply {} tint={tint:?} ok={ok} peak={}", display.id, ramp[255]),
+            );
         } else if let Some((_, original)) = saved.iter().find(|(id, _)| id == &display.id) {
             gamma::write_ramp(&display.id, original);
         }

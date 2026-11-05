@@ -102,6 +102,7 @@ function mockHost() {
         if (typeof params.preset === "string") cfg.preset = params.preset;
         if (typeof params.kelvin === "number") cfg.kelvin = params.kelvin;
         if (typeof params.brightness === "number") cfg.brightness = params.brightness;
+        if (typeof params.target === "string") cfg.target = params.target;
         if (params.color !== undefined) cfg.color = params.color;
         if (params.schedule) Object.assign(cfg.schedule, params.schedule);
         return payload();
@@ -162,6 +163,10 @@ function fmtClock(seconds) {
   return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
+function rgbToHex(rgb) {
+  return "#" + rgb.map((n) => Math.round(n).toString(16).padStart(2, "0")).join("");
+}
+
 function fmtTime(minutes) {
   const h = Math.floor(minutes / 60) % 24;
   return `${String(h).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
@@ -170,6 +175,25 @@ function fmtTime(minutes) {
 function toMinutes(text) {
   const [h, m] = text.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
+}
+
+// 开关是普通按钮，不靠 checkbox 的 change 事件——沙箱里那套隐式关联不一定可靠
+function setSwitch(id, on) {
+  const node = el(id);
+  node.classList.toggle("on", on);
+  node.setAttribute("aria-checked", String(on));
+}
+
+/// 统一出口：把失败暴露到界面上，否则出问题只会表现为「点了没反应」
+async function send(method, params) {
+  try {
+    S = await api.invoke(method, params);
+    render();
+    return true;
+  } catch (err) {
+    el("sub").textContent = `调用失败：${err?.message || err}`;
+    return false;
+  }
 }
 
 function render() {
@@ -198,23 +222,50 @@ function render() {
   parts.push(`${S.displays?.length || 0} 块屏`);
   el("sub").textContent = parts.join(" · ");
 
-  el("enabled").checked = !!S.enabled;
+  el("enabled").classList.toggle("on", !!S.enabled);
+  el("enabled").setAttribute("aria-checked", String(!!S.enabled));
   el("kelvin").value = S.kelvin;
   el("kelvinNum").textContent = S.kelvin;
   el("brightness").value = Math.round(S.brightness * 100);
   el("brightnessVal").textContent = `${Math.round(S.brightness * 100)}%`;
+  if (S.color) el("color").value = rgbToHex(S.color);
 
-  el("auto").checked = !!S.schedule.enabled;
+  setSwitch("auto", !!S.schedule.enabled);
   el("dayStart").value = fmtTime(S.schedule.dayStart);
   el("nightStart").value = fmtTime(S.schedule.nightStart);
   el("dayK").value = S.schedule.dayKelvin;
   el("nightK").value = S.schedule.nightKelvin;
   el("transition").value = S.schedule.transition;
 
-  el("breakOn").checked = !!S.break.enabled;
+  setSwitch("breakOn", !!S.break.enabled);
   el("workMinutes").value = S.break.workMinutes;
 
+  renderTarget();
   renderPresets();
+}
+
+// 显示器列表不常变，只有变了才重建 option
+function renderTarget() {
+  const sel = el("target");
+  const list = S.displays || [];
+  const want = ["all", ...list.map((d) => d.id)].join("|");
+  const have = [...sel.options].map((o) => o.value).join("|");
+
+  if (want !== have) {
+    sel.innerHTML = "";
+    const all = document.createElement("option");
+    all.value = "all";
+    all.textContent = "全部屏幕";
+    sel.appendChild(all);
+    for (const d of list) {
+      const option = document.createElement("option");
+      option.value = d.id;
+      option.textContent = `${d.name} ${d.width}×${d.height}${d.hdr ? " · HDR" : ""}`;
+      sel.appendChild(option);
+    }
+  }
+
+  sel.value = S.target || "all";
 }
 
 function renderPresets() {
@@ -234,10 +285,7 @@ function renderPresets() {
     nm.textContent = p.name;
 
     btn.append(sw, nm);
-    btn.addEventListener("click", async () => {
-      S = await api.invoke("eyecare/preset", { id: p.id });
-      render();
-    });
+    btn.addEventListener("click", () => send("eyecare/preset", { id: p.id }));
     wrap.appendChild(btn);
   }
 }
@@ -288,32 +336,39 @@ function debounce(fn) {
 }
 
 function bind() {
-  el("enabled").addEventListener("change", async (e) => {
-    S = await api.invoke("eyecare/config", { enabled: e.target.checked });
-    render();
+  el("target").addEventListener("change", (e) =>
+    send("eyecare/config", { target: e.target.value })
+  );
+
+  el("color").addEventListener("input", (e) => {
+    const v = e.target.value;
+    const rgb = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16));
+    send("eyecare/tint", { color: rgb });
+  });
+
+  el("enabled").addEventListener("click", async () => {
+    const next = !S.enabled;
+    // 先动界面，反馈立刻可见；失败会在 send 里把错误写到副标题
+    setSwitch("enabled", next);
+    await send("eyecare/config", { enabled: next });
   });
 
   el("kelvin").addEventListener("input", (e) => {
     const v = Number(e.target.value);
     el("kelvinNum").textContent = v;
-    debounce(async () => {
-      S = await api.invoke("eyecare/tint", { kelvin: v });
-      render();
-    });
+    debounce(() => send("eyecare/tint", { kelvin: v }));
   });
 
   el("brightness").addEventListener("input", (e) => {
     const v = Number(e.target.value);
     el("brightnessVal").textContent = `${v}%`;
-    debounce(async () => {
-      S = await api.invoke("eyecare/tint", { brightness: v / 100 });
-      render();
-    });
+    debounce(() => send("eyecare/tint", { brightness: v / 100 }));
   });
 
-  el("auto").addEventListener("change", async (e) => {
-    S = await api.invoke("eyecare/config", { schedule: { enabled: e.target.checked } });
-    render();
+  el("auto").addEventListener("click", async () => {
+    const next = !S.schedule.enabled;
+    setSwitch("auto", next);
+    await send("eyecare/config", { schedule: { enabled: next } });
   });
 
   for (const [id, key] of [
@@ -321,39 +376,35 @@ function bind() {
     ["nightK", "nightKelvin"],
     ["transition", "transition"],
   ]) {
-    el(id).addEventListener("change", async (e) => {
-      S = await api.invoke("eyecare/config", { schedule: { [key]: Number(e.target.value) } });
-      render();
-    });
+    el(id).addEventListener("change", (e) =>
+      send("eyecare/config", { schedule: { [key]: Number(e.target.value) } })
+    );
   }
 
-  el("dayStart").addEventListener("change", async (e) => {
-    S = await api.invoke("eyecare/config", { schedule: { dayStart: toMinutes(e.target.value) } });
-    render();
-  });
+  el("dayStart").addEventListener("change", (e) =>
+    send("eyecare/config", { schedule: { dayStart: toMinutes(e.target.value) } })
+  );
 
-  el("nightStart").addEventListener("change", async (e) => {
-    S = await api.invoke("eyecare/config", { schedule: { nightStart: toMinutes(e.target.value) } });
-    render();
-  });
+  el("nightStart").addEventListener("change", (e) =>
+    send("eyecare/config", { schedule: { nightStart: toMinutes(e.target.value) } })
+  );
 
-  el("breakOn").addEventListener("change", async (e) => {
-    S = await api.invoke("eyecare/break", { enabled: e.target.checked });
+  el("breakOn").addEventListener("click", async () => {
+    const next = !S.break.enabled;
+    setSwitch("breakOn", next);
+    await send("eyecare/break", { enabled: next });
     careRemain = S.break.remainingSeconds ?? 0;
-    render();
   });
 
   el("workMinutes").addEventListener("change", async (e) => {
-    S = await api.invoke("eyecare/break", { workMinutes: Number(e.target.value) });
+    await send("eyecare/break", { workMinutes: Number(e.target.value) });
     careRemain = S.break.remainingSeconds ?? 0;
-    render();
   });
 
   el("skip").addEventListener("click", async () => {
-    S = await api.invoke("eyecare/break", { action: "skip" });
+    await send("eyecare/break", { action: "skip" });
     careRemain = S.break.remainingSeconds ?? 0;
     el("banner").classList.add("hidden");
-    render();
   });
 
   el("bannerClose").addEventListener("click", () => el("banner").classList.add("hidden"));

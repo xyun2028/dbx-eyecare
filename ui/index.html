@@ -24,45 +24,52 @@
           <p id="sub" class="sub">正在连接…</p>
         </div>
       </div>
-      <label class="switch">
-        <input id="enabled" type="checkbox" />
-        <span class="slider"></span>
-      </label>
+      <button id="enabled" class="switch" role="switch" aria-checked="false" title="开关护眼">
+        <span class="knob"></span>
+      </button>
     </header>
 
-    <main class="body">
-      <section class="col">
-        <div class="card hero">
-          <div class="hero-head">
-            <span class="label">色温</span>
-            <span class="big"><span id="kelvinNum">4500</span><i>K</i></span>
-          </div>
-          <input id="kelvin" class="range-temp" type="range" min="1000" max="6500" step="50" />
-          <div class="scale"><span>1000 · 暖</span><span>6500 · 中性</span></div>
+    <main class="grid">
+      <section class="card control">
+        <div class="hero-head">
+          <span class="label">色温</span>
+          <span class="big"><span id="kelvinNum">4500</span><i>K</i></span>
+        </div>
+        <input id="kelvin" class="range-temp" type="range" min="1000" max="6500" step="50" />
+        <div class="scale"><span>1000 · 暖</span><span>6500 · 中性</span></div>
 
-          <div class="divider"></div>
+        <div class="divider"></div>
 
-          <div class="row">
-            <label for="brightness">亮度</label>
-            <input id="brightness" class="range-dim" type="range" min="10" max="100" step="1" />
-            <span id="brightnessVal" class="val">100%</span>
-          </div>
+        <div class="row">
+          <label for="target">应用到</label>
+          <select id="target"></select>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h2>预设</h2></div>
-          <div id="presets" class="presets"></div>
+        <div class="row">
+          <label for="color">颜色</label>
+          <input id="color" type="color" value="#c7edcc" />
+          <span class="muted">取色即生效，会切到自定义</span>
+        </div>
+
+        <div class="row">
+          <label for="brightness">亮度</label>
+          <input id="brightness" class="range-dim" type="range" min="10" max="100" step="1" />
+          <span id="brightnessVal" class="val">100%</span>
         </div>
       </section>
 
-      <section class="col">
+      <section class="card presets-card">
+        <div class="card-head"><h2>预设</h2></div>
+        <div id="presets" class="presets"></div>
+      </section>
+
+      <section class="side">
         <div class="card">
           <div class="card-head">
             <h2>按时间自动</h2>
-            <label class="switch">
-              <input id="auto" type="checkbox" />
-              <span class="slider"></span>
-            </label>
+            <button id="auto" class="switch" role="switch" aria-checked="false" title="按时间自动">
+              <span class="knob"></span>
+            </button>
           </div>
           <div class="row">
             <span class="dot day"></span>
@@ -86,10 +93,9 @@
         <div class="card">
           <div class="card-head">
             <h2>20-20-20</h2>
-            <label class="switch">
-              <input id="breakOn" type="checkbox" />
-              <span class="slider"></span>
-            </label>
+            <button id="breakOn" class="switch" role="switch" aria-checked="false" title="休息提醒">
+              <span class="knob"></span>
+            </button>
           </div>
           <div class="clock">
             <span id="breakTime" class="clock-num">20:00</span>
@@ -108,7 +114,7 @@
 
     <footer class="foot">
       <span id="hostMode" class="tag">连接中</span>
-      <span>每 20 分钟看 20 英尺外 20 秒</span>
+      <span>调的是显示器 Gamma 表，不盖遮罩；开了 HDR 的屏幕不生效</span>
     </footer>
 
     <script type="module" src="app.js"></script>
