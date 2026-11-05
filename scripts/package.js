@@ -294,11 +294,49 @@ function main() {
     JSON.stringify(artifact, null, 2) + "\n"
   );
 
+  // 上架用的两个清单：Release 里的汇总，以及要提给 dbx-store 的候选文件
+  const REPO = "https://github.com/xyun2028/dbx-eyecare";
+  const tag = `v${manifest.version}`;
+  const storeMeta = fs.existsSync(path.join(ROOT, ".dbx-store.json"))
+    ? JSON.parse(fs.readFileSync(path.join(ROOT, ".dbx-store.json"), "utf8"))
+    : {};
+
+  const candidate = {
+    schemaVersion: 1,
+    id: manifest.id,
+    publisher: manifest.publisher,
+    version: manifest.version,
+    name: manifest.name,
+    source: `${REPO}/tree/${tag}`,
+    license: storeMeta.license || "MIT",
+    targets: [
+      {
+        target: TARGET,
+        url: `${REPO}/releases/download/${tag}/${pkgName}`,
+        sha256: artifact.sha256,
+        size: artifact.size,
+      },
+    ],
+  };
+
+  const candidateDir = path.join(DIST, "candidates");
+  const publisherDir = path.join(DIST, "publishers");
+  fs.mkdirSync(candidateDir, { recursive: true });
+  fs.mkdirSync(publisherDir, { recursive: true });
+
+  fs.writeFileSync(path.join(DIST, "release-candidates.json"), JSON.stringify(candidate, null, 2) + "\n");
+  fs.writeFileSync(path.join(candidateDir, `${manifest.id}.json`), JSON.stringify(candidate, null, 2) + "\n");
+  fs.writeFileSync(
+    path.join(publisherDir, `${manifest.publisher}.json`),
+    JSON.stringify({ id: manifest.publisher, name: manifest.publisher, status: "unverified" }, null, 2) + "\n"
+  );
+
   console.log("\n打包完成");
   console.log(`  文件    ${pkgName}`);
   console.log(`  大小    ${(stat.size / 1024 / 1024).toFixed(2)} MB`);
   console.log(`  条目    ${inZip.length} 个，checksums 精确覆盖`);
   console.log(`  侧车    ${staged.entrypoints.backend.executable}（权限 ${(binEntry.mode & 0o777).toString(8)}）`);
+  console.log(`  上架    release-candidates.json / candidates/${manifest.id}.json / publishers/${manifest.publisher}.json`);
 }
 
 main();

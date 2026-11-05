@@ -242,6 +242,25 @@ function render() {
 
   renderTarget();
   renderPresets();
+  renderHdrNote();
+}
+
+/// HDR 开着时 Windows 会绕过 Gamma 表，调整写了也是白写。
+/// 这个必须提前说清楚，否则用户会以为是插件坏了。
+function renderHdrNote() {
+  const note = el("hdrNote");
+  const affected = (S.displays || []).filter(
+    (d) => (S.target === "all" || S.target === d.id) && d.hdr === true
+  );
+
+  if (affected.length === 0 || !S.enabled) {
+    note.classList.add("hidden");
+    return;
+  }
+
+  const names = affected.map((d) => d.name).join("、");
+  note.textContent = `${names} 开启了 HDR，Windows 会绕过 Gamma 表，这些屏幕上的色温调整不会生效。`;
+  note.classList.remove("hidden");
 }
 
 // 显示器列表不常变，只有变了才重建 option

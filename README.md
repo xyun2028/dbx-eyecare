@@ -89,8 +89,11 @@ incompatible，不会有任何解释，所以宁可在本地拦住。
 产物在 `dist/`：
 
 ```
-com.eyecare.dbx-0.1.0-windows-x64.dbxp
-com.eyecare.dbx-0.1.0-windows-x64.artifact.json   # target / url / sha256 / size
+com.eyecare.dbx-0.1.5-windows-x64.dbxp              # 安装包
+com.eyecare.dbx-0.1.5-windows-x64.artifact.json     # target / url / sha256 / size
+release-candidates.json                             # 挂到 Release，供商店同步流程读取
+candidates/com.eyecare.dbx.json                     # 提给 dbx-store 的候选文件
+publishers/xyun2028.json                            # 提给 dbx-store 的发布者记录
 ```
 
 测试：
@@ -98,6 +101,25 @@ com.eyecare.dbx-0.1.0-windows-x64.artifact.json   # target / url / sha256 / size
 ```bash
 cargo test --manifest-path backend/Cargo.toml
 ```
+
+## 发布到官方商店
+
+商店目录在 [t8y2/dbx-store](https://github.com/t8y2/dbx-store)（不是 `t8y2/dbx`）。
+
+1. 把 `dist/` 里的 dbxp、artifact 和 `release-candidates.json` 挂到 GitHub Release，
+   Tag 用 `v<version>`。**dbxp 不要提交进 Git 历史。**
+2. Fork `dbx-store`，向 `main` 提一个 PR，放入 `publishers/xyun2028.json` 和
+   `candidates/com.eyecare.dbx.json`（这两个文件 `dist/` 里已经生成好了）。
+   PR 里不要放 dbxp 二进制、源码副本或任何私钥。
+3. 维护者审核源码、清单、权限、SHA-256 与原生行为，通过后由 DBX Store 统一加
+   Ed25519 签名。**作者不需要自己签名，也不要填 `signingKeyId`。**
+4. 签名结果回写到同一个 PR，合并后进入商店目录。
+
+之后发版只需递增 `manifest.json` 的 `version`、发新 Release，不必再改商店文件。
+已发布的 id + 版本组合不可覆盖，任何改动都要升版本重新审核。
+
+商店文案（名称、简介、标签、英文说明）在 `.dbx-store.json`，只在首次上架或主动
+修改商店信息时更新。
 
 ## 数据落在哪
 

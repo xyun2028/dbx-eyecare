@@ -3,17 +3,18 @@
   "manifest_version": 1,
   "id": "com.eyecare.dbx",
   "name": "Eye眼",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "xyun2028",
   "description": "在 DBX 里直接调屏幕色温、按时段自动切换，每 20 分钟提醒你抬头看远处",
+  "source": "https://github.com/xyun2028/dbx-eyecare",
+  "homepage": "https://github.com/xyun2028/dbx-eyecare#readme",
   "icon": "ui/icon.png",
   "engines": {
     "host_api": "1.4"
   },
   "permissions": [
     "host.workbench",
-    "host.events",
-    "host.binary"
+    "host.events"
   ],
   "entrypoints": {
     "backend": {
