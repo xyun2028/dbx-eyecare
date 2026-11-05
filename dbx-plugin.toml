@@ -1,0 +1,24 @@
+# 构建配置
+#
+# 注意：含 sidecar 的插件必须按平台分别发包，纯 universal 包不可用。
+# 打包脚本需按目标平台改写 manifest.entrypoints.backend.executable：
+#   windows-*  -> bin/windows-x64/eyecare-sidecar.exe
+#   darwin/*   -> bin/<target>/eyecare-sidecar
+
+include = [
+  "manifest.json",
+  "ui/**",
+  "bin/**",
+]
+
+exclude = [
+  "backend/**",
+  "docs/**",
+  "scripts/**",
+  "target/**",
+  "dist/**",
+]
+
+[dev]
+# 先把 sidecar 构建到 bin/，再交给宿主加载
+build = ["cargo", "build", "--release", "--manifest-path", "backend/Cargo.toml"]

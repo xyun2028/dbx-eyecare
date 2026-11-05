@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/t8y2/dbx/main/plugins/manifest.schema.json",
+  "manifest_version": 1,
+  "id": "com.eyecare.dbx",
+  "name": "Eye眼",
+  "version": "0.1.0",
+  "publisher": "xyun2028",
+  "description": "在 DBX 里直接调屏幕色温、按时段自动切换，每 20 分钟提醒你抬头看远处",
+  "icon": "ui/icon.png",
+  "engines": {
+    "host_api": "1.4"
+  },
+  "permissions": [
+    "host.workbench",
+    "host.events",
+    "host.binary"
+  ],
+  "entrypoints": {
+    "backend": {
+      "executable": "bin/windows-x64/eyecare-sidecar.exe"
+    },
+    "ui": {
+      "root": "ui",
+      "entry": "ui/index.html"
+    }
+  },
+  "contributions": [
+    {
+      "type": "workbench",
+      "id": "com.eyecare.dbx.console",
+      "label": "Eye眼",
+      "icon": "ui/icon.png"
+    }
+  ]
+}

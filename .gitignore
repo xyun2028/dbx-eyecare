@@ -1,0 +1,16 @@
+# 编译产物
+/target
+/backend/target
+
+# 打包输出（由构建脚本生成，不入库）
+/bin
+/dist
+
+# 工作区本地数据
+/.workbuddy
+/.idea
+/.openidea
+/.vscode
+
+Thumbs.db
+.DS_Store
