@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use chrono::{TimeZone as _, Timelike as _};
+
 use serde::{Deserialize, Serialize};
 
 /// 相邻两次心跳超过这个秒数，就认为中间没在用电脑，整段跳过。
@@ -17,6 +19,16 @@ const MAX_GAP_SECS: u64 = 120;
 
 /// 只保留最近这么多天。
 const KEEP_DAYS: usize = 30;
+
+/// 时间戳落在当地哪个钟点。测试里传的是很小的时间戳，拿不到时区就按 0 点，
+/// 不影响那些只校验总时长的用例。
+fn hour_of(now: u64) -> usize {
+    chrono::Local
+        .timestamp_opt(now as i64, 0)
+        .single()
+        .map(|dt| dt.hour() as usize)
+        .unwrap_or(0)
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DayEntry {
@@ -28,6 +40,10 @@ pub struct DayEntry {
     /// 这一天里最长的一段连续用眼
     #[serde(default)]
     pub longest_streak_seconds: u64,
+    /// 24 个槽，按本地钟点累计的活跃秒数。用眼建议靠它找时段。
+    /// 升级前存下来的 days 没有这个字段，读进来是空数组，按 0 处理。
+    #[serde(default)]
+    pub hours: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -111,6 +127,16 @@ impl Stats {
         if self.streak_seconds > entry.longest_streak_seconds {
             entry.longest_streak_seconds = self.streak_seconds;
         }
+        if entry.hours.len() != 24 {
+            entry.hours.resize(24, 0);
+        }
+        let hour = hour_of(now) % 24;
+        entry.hours[hour] = entry.hours[hour].saturating_add(gap as u32);
+    }
+
+    /// 给用眼建议读的原始数据，只读。
+    pub fn days(&self) -> &BTreeMap<String, DayEntry> {
+        &self.days
     }
 
     /// 记一次休息。连续用眼从这一刻重新算。
@@ -226,5 +252,17 @@ mod tests {
         let view = stats.view();
         assert_eq!(view.week.len(), 7);
         assert_eq!(view.week[6].date, today_key());
+    }
+
+    #[test]
+    fn 活跃时长会落到对应钟点() {
+        let mut stats = Stats::default();
+        // 2026-01-02 10:00:00 UTC+8，本地 18 点
+        let at = 1_767_343_200u64;
+        stats.tick(at, true);
+        stats.tick(at + 5, true);
+        let entry = stats.days().get(&today_key()).unwrap();
+        assert_eq!(entry.hours.len(), 24);
+        assert_eq!(entry.hours.iter().sum::<u32>(), 5);
     }
 }

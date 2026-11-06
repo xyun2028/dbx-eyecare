@@ -31,9 +31,25 @@ GNOME 和 KDE 都不让第三方改 Gamma 表。XWayland 能连上 X，但改的
 - **日出日落**：填经纬度，按当地太阳时间自动决定什么时候变暖，不用每季度手动改时刻
 - **工作日 / 周末**：两套曲线。周末可以单独设，也可以跟着工作日走
 - **20-20-20**：每工作 20 分钟提醒一次，休息 20 秒。到点屏幕会短暂变暖压暗，
-  不打开面板也能察觉；也可以关掉这个行为，只保留面板里的横幅
-- **用眼记录**：今天亮了多久、休息了几次、最长连续多久，存最近 30 天
-- **逐屏独立**：多显示器可以只调其中一块
+  默认 6 秒后恢复（2–60 秒可配），不打开面板也能察觉；也可以关掉这个行为，
+  只保留面板里的横幅
+- **用眼记录**：今天亮了多久、休息了几次、最长连续多久，存最近 30 天，
+  并按钟点累计，供「用眼建议」分析
+- **逐屏独立**：每块屏各自决定要不要参与，以及跟随全局、用自己的色温、还是用自己的
+  滤色；亮度和色温/颜色都能单独设。也可在「应用到」里快速只选一块屏
+- **锚点增删**：曲线上的锚点可以任意加减，最多 12 个，最少留 1 个
+- **在场感知**：超过两分钟没碰键鼠就暂停提醒和用眼计时，回来接着算；
+  休息期间若仍在用电脑，那一次不计入「休息了几次」
+- **全屏让位 / 演示模式**：前台是全屏内容时暂停写屏与提醒；也可一键暂停 60 分钟，
+  适合投屏和开会，到点自动恢复
+- **抢桌检测**：写屏前读回 Gamma 表，和上次自己写的比对。发现被别的软件改过
+  （f.lux、Night Shift、显卡驱动）就暂停写屏并在面板说明，不互相覆盖
+- **用眼建议**（默认关）：分析本地记录里最容易连续用眼的时段，给一句结论和
+  一个「应用」按钮。开关不打开不分析，不点应用不改配置
+- **转暖倒数**：面板显示距离下一次转暖还有多久，日出日落模式下跟着当天日落走
+- **内置使用说明**：首页右上角「使用说明」按钮打开 11 章弹框，覆盖调色、预设、曲线、
+  逐屏、20-20-20、用眼建议、隐私与常见问题。整篇内联在页面里，离线可读，
+  不请求任何外部资源
 
 ## 为什么是 Gamma，不是遮罩
 
@@ -49,7 +65,7 @@ DBX 把插件界面跑在 `sandbox="allow-scripts"` 的 iframe 里，没有网�
 不能起进程。所以凡是碰系统的活都必须放在侧车里：
 
 ```
-ui/                 沙箱前端：只管显示和发 RPC
+ui/                 沙箱前端：只管显示和发 RPC；使用说明整篇内联在 index.html
 backend/            Rust 侧车：stdin/stdout 上行分隔 JSON-RPC 2.0
   src/main.rs       读帧、分发、退出时还原屏幕
   src/rpc.rs        方法表与握手
@@ -57,7 +73,9 @@ backend/            Rust 侧车：stdin/stdout 上行分隔 JSON-RPC 2.0
   src/color.rs      色温 → Gamma 表
   src/model.rs      预设、24 小时曲线、日出日落规则、休息计时
   src/sun.rs        本地算日出日落（NOAA 公式，不联网）
-  src/stats.rs      用眼记录
+  src/stats.rs      用眼记录（总量 + 24 个钟点槽）
+  src/presence/     在场感知：距上次键鼠输入多久、前台是否全屏（按平台分派）
+  src/insight.rs    用眼建议：只生成建议，由界面显式「应用」才写进曲线
   src/gamma/
     mod.rs          公共的 Ramp 类型、重采样、平台分派
     windows.rs      GDI + DisplayConfig
@@ -90,7 +108,40 @@ const state = await window.dbxPlugin.invoke("eyecare/state", {});
 | `eyecare/preset.rename` | 改自定义预设的名字 |
 | `eyecare/preset.delete` | 删一个自定义预设 |
 | `eyecare/tint` | 自定义色温或亮度，自动切到 custom |
-| `eyecare/break` | 休息计时：开关、间隔、`dimScreen`、`action: "skip"` / `"endRest"` |
+| `eyecare/break` | 休息计时：开关、间隔、`restSeconds`、`dimScreen`、`dimSeconds`（压暗持续几秒）、`action: "skip"` / `"endRest"` |
+| `eyecare/screen` | 改单块屏：`id` / `enabled` / `mode: "follow"｜"custom"｜"filter"` / `kelvin` / `color`（RGB 数组或 null）/ `brightness` |
+| `eyecare/presence` | `idleAware` / `fullscreenPause` / `realRest` / `presentationMinutes`（0 表示结束演示） |
+| `eyecare/insight` | `enabled` 开关；`action: "apply"` 只把建议锚点写进曲线，不替用户打开自动 |
+| `eyecare/gamma.resume` | 抢桌提示后重新接管屏幕 |
+
+`eyecare/state` 里除了上表这些配置，还多出四组只读字段：
+
+```json
+{
+  "screens": [
+    { "id": "\\\\.\\DISPLAY1", "name": "DISPLAY1", "enabled": true,
+      "mode": "filter", "kelvin": 4000, "color": [199, 237, 204], "brightness": 0.9,
+      "effectiveKelvin": null, "effectiveRgb": [199, 237, 204],
+      "effectiveKind": "rgb", "hdr": false }
+  ],
+  "presence": { "idleSeconds": 7, "idleSupported": true, "fullscreen": false,
+    "away": false, "pausedReason": "", "presentationLeftSeconds": 0,
+    "note": "只读取距上次键鼠输入的秒数，不记录按键内容、不读窗口标题、不联网。" },
+  "insight": { "enabled": false, "summary": "…", "at": 1290,
+    "kelvin": 3500, "canApply": false, "days": 5 },
+  "gammaConflict": null
+}
+```
+
+`gammaConflict` 有值时表示那块屏的 Gamma 表被别的程序改过，插件已暂停写屏，
+要等界面点「重新接管」。`idleSupported` 为 false 时（Wayland、无图形会话），
+空闲暂停自动退回旧的固定计时，不会静悄悄停掉提醒。
+
+`presence` 用到的系统接口按平台分派，和 gamma 层同构：
+Windows 是 `GetLastInputInfo` + `GetForegroundWindow`/`GetWindowRect`；
+macOS 是 `CGEventSourceSecondsSinceLastEventType`（全屏判定暂未实现）；
+Linux/X11 是 screensaver 扩展 + EWMH `_NET_WM_STATE_FULLSCREEN`。
+全部只做查询，不订阅输入、不读窗口标题、不联网、不起子进程。
 
 `schedule` 是这轮改动最大的地方：
 
@@ -130,11 +181,16 @@ const state = await window.dbxPlugin.invoke("eyecare/state", {});
 `support.available` 为 false 时，界面上会直接把 `reason` 显示出来，
 不用用户猜为什么拖滑杆没反应。
 
-侧车推给前端的事件只有一条：
+侧车推给前端的事件有两条：
 
 ```
-evt/break.due   { restSeconds, dimScreen, at }
+evt/break.due       { restSeconds, dimSeconds, dimScreen, at }
+evt/gamma.conflict  { display, at }
 ```
+
+`dimSeconds` 是屏幕压暗持续的秒数，和 `restSeconds`（20-20-20 的休息时长）解耦：
+提醒横幅按 `restSeconds` 计时，屏幕只在 `dimSeconds` 内变暖变暗，然后自动恢复。
+默认 6 秒，可配范围 2–60。
 
 ## 构建与打包
 
@@ -232,7 +288,8 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 
 - `config.json` —— 配置
 - `original_ramp.txt` —— 改屏之前拍下的原始 Gamma 表
-- `stats.json` —— 用眼记录，按天存，只保留最近 30 天
+- `stats.json` —— 用眼记录，按天存，只保留最近 30 天；每天除了总量还有 24 个钟点槽。
+  升级前存下来的天没有钟点槽，用眼建议会等攒够新数据再给结论，不会拿旧数据硬凑
 
 第二个是关键。插件被强杀时来不及做任何清理，下次启动发现它还在，
 就先把屏幕还原再继续。没有它，一次崩溃就会让屏幕一直偏色。
@@ -246,24 +303,55 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 
 ## 已验证 / 未验证
 
-**验证过的：**
+**验证过的（0.2.0 开发树，含本轮改动）：**
 
 - Windows 实机：握手返回 `protocolVersion` / `capabilities` / `plugin.id+version`
 - Windows 实机：`eyecare/state` 读出两块 1920×1080 显示器、HDR 状态、7 个预设
 - Windows 实机：写表返回 `ok=true`；关掉开关写回线性表
-- 色温与滤色的换算、表重采样、备份往返、日出日落、曲线插值、周历切换、用眼累加：44 个单元测试
-- 编译：`x86_64-pc-windows-gnu`（宿主）、`aarch64-pc-windows-msvc`、
-  `x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、
-  `x86_64-apple-darwin`、`aarch64-apple-darwin` 全部 `cargo check` 通过
-- 打包：Windows 出包，包内 manifest 的 `backend.executable` 指向 `bin/windows-x64/`
+- **真实侧车 JSON-RPC 冒烟测试**：两块屏分别下发配置后，日志里
+  `DISPLAY1 tint=Kelvin(4000) screen=Custom`、`DISPLAY2 tint=Kelvin(6500) screen=Follow`，
+  逐屏独立确实落到了两块屏上；把 DISPLAY1 切到 `filter` 并给 `[199,237,204]` 后，
+  状态返回 `effectiveKind: "rgb"`、`effectiveRgb: [199,237,204]`、`effectiveKelvin: null`。
+  `eyecare/screen`、`eyecare/presence`、`eyecare/insight`、`eyecare/gamma.resume`
+  都返回预期状态，空显示器 id 会被拒绝
+- **应用建议不代开自动**：预置 5 天记录后点应用，锚点 5→6，
+  `schedule.enabled` 前后都是 `false`，面板给出「自己打开按时间自动」的提示
+- **在场感知在 Windows 实机读到了值**：`idleSupported=true`
+- **正常退出会还原屏幕**：`shutdown` 后日志出现两条 `restore-backup ok=true peak=65535`
+  和 `stdin closed, screen restored`，`original_ramp.txt` 被清掉
+- 66 个单元测试通过：色温换算、Gamma 重采样、备份往返、日出日落、曲线插值与跨零点、
+  周历切换、用眼累加与钟点分布、锚点上限/单锚点曲线、逐屏色温与逐屏滤色（含回退）、
+  休息结算、压暗时长与休息时长解耦、抢桌比对、用眼建议的分析与写入
+- 编译：`x86_64-pc-windows-gnu`（宿主）、`x86_64-unknown-linux-gnu`、
+  `x86_64-apple-darwin` 本轮重新 `cargo check` 通过；ARM 与其余目标沿用之前的检查
+- **界面在真实 Chrome 里跑过演示后端**：锚点 5→6→5、逐屏切独立改 3000K、
+  逐屏切滤色并取色（色温输入自动收起、生效列出现色块）、用眼建议开关与应用
+  （新增锚点但「按时间自动」仍关着）、两种倒数、演示模式开关、在场开关；
+  浅色与深色两套主题截图检查过，没有溢出、重叠和控制台报错
+- **使用说明弹框在真实 Chrome 里跑过**：11 章与 11 个目录项一一对应、目录跳转、
+  关掉重开立刻回到顶部、Esc / 点遮罩 / 两个关闭按钮、点弹框内部不关闭、
+  Tab 焦点锁在弹框内、关闭后焦点回到首页按钮；浅色、深色、600px 窄屏三套截图
+  检查过，正文可选中复制，没有横向溢出和控制台报错
+- 打包：本轮重新出了 Windows 包 `dist/com.eyecare.dbx-0.2.0-windows-x64.dbxp`
+  （899124 字节，SHA-256 `5c17fe3c74ad55ea0d39d79d32b36908df697081052af3e9bd74de3a4a3d469d`）。
+  包内 `backend.executable` 指向 `bin/windows-x64/`，`manifest.json` 权限仍是
+  `host.workbench` + `host.events`；解开包直接跑里面的 exe 验证过握手、
+  `screens` / `presence` / `insight` / `gammaConflict` 字段、逐屏滤色模式和
+  `break.dimSeconds=6`，关机收尾也会还原屏幕。包内 `ui/index.html` 含「使用说明」按钮、11 章正文和
+  11 个目录项，`ui/style.css` / `ui/app.js` 含弹框样式与交互，整页没有任何外链。
+  `dist/` 被 `.gitignore` 忽略，产物不进 Git 历史
 
 **没验证的：**
 
 - **macOS 和 Linux 没有在真机上跑过。** 这两份实现只保证编译通过、API 用法正确，
   实际的 gamma 写入效果、多屏排序、权限行为都要等真机验证。
+  新增的 `CGEventSourceSecondsSinceLastEventType` 与 X11 screensaver / EWMH 查询同理，
+  尤其 macOS 的全屏判定尚未实现，会一直按「不是全屏」处理。
+- **抢桌检测没有制造过真实冲突**（没有同时跑 f.lux 之类的软件实测），
+  只验证了表比对的阈值逻辑和「重新接管」这条路径。
 - **ARM 硬件没跑过**，只做了交叉编译检查。
 - **没有在真实 DBX 宿主里加载过**。宿主侧的事件形状、`manifest.json` 的字段、
-  侧车首帧格式以实际表现为准。
+  侧车首帧格式以实际表现为准；`evt/gamma.conflict` 也还没在宿主里接过。
 - Wayland 的降级提示写了，但没有在 Wayland 会话里实际触发过。
 - macOS 的 EDR/HDR 状态查不到，`hdr` 字段返回 `null`，界面上不会提示。
 - 没有签名。未签名包需要在插件中心打开「允许安装未签名开发包」才能装。
@@ -271,15 +359,19 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 ## 已知限制
 
 - 亮度是软件层缩放，不是调显示器背光，最低压到 10%
-- 独占全屏的程序不受影响（Gamma 表被绕过，属正常现象）
-- HDR 开启时 Gamma 表会被系统绕过，界面上会提示（仅 Windows 能查到 HDR 状态）
-- Wayland 会话不支持，会在面板上说明原因
+- 独占全屏的程序不受影响（Gamma 表被绕过，属正常现象）；插件只在这时暂停自己的写屏和提醒
+- HDR 开启时 Gamma 表会被系统绕过，界面上会提示（仅 Windows 能查到 HDR 状态）。
+  这类屏会跳过抢桌比对，否则会一直误报
+- Wayland 会话不支持改色温，会在面板上说明原因；空闲与全屏检测查不到时自动退回固定计时
 - macOS 上如果系统开了原彩显示（True Tone）或 Night Shift，会和插件叠加，
   最终效果不是插件单独算出来的那个
 - 日出日落要自己填经纬度。插件没有定位权限，也不联网，只能按填进去的位置算
-- 曲线上的锚点数量固定（新装五个、从 0.1.x 升级上来两个），这一版只能拖位置和改色温，
-  还不能增删锚点
-- 用眼记录只在插件跑着、并且护眼开关打开时累加；关掉的那段时间不算
+- **逐屏滤色没存过颜色时**先沿用全局滤色，全局也不是滤色就退回纸色，
+  不会出现「切到滤色结果屏幕发黑」。三种模式下的亮度都是各屏自己的
+- 用眼建议至少需要 3 天带钟点分布的新记录；老版本存下来的数据没有钟点槽，
+  不会参与分析。**应用建议只加锚点，不会替用户打开「按时间自动」**——
+  曲线关着时锚点不起作用，面板会提示用户自己到曲线卡片点开
+- 用眼记录只在插件跑着、护眼开关打开、且人确实在电脑前时累加；关掉的那段时间不算
 - 侧车正常退出时会把屏幕还原；如果宿主直接结束进程，这一步不会执行，
   屏幕停在当前颜色上，下次启动靠 `original_ramp.txt` 恢复
 

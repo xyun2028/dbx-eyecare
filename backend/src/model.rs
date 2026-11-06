@@ -23,6 +23,11 @@ pub const USER_PREFIX: &str = "user:";
 pub const KELVIN_MIN: u32 = 1000;
 pub const KELVIN_MAX: u32 = 6500;
 
+/// 一条曲线上允许的最多锚点。太少表达不了分段，太多在 720px 宽的图里挤成一团。
+pub const MAX_ANCHORS: usize = 12;
+/// 至少要留一个锚点，否则「这一刻该用多少色温」没有基准。
+pub const MIN_ANCHORS: usize = 1;
+
 pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -303,6 +308,10 @@ impl Schedule {
         self.points.dedup_by_key(|a| a.at);
         self.weekend_points.dedup_by_key(|a| a.at);
 
+        // 界面允许增删锚点，这里兜住上限，免得配置文件被写进几百个点
+        self.points.truncate(MAX_ANCHORS);
+        self.weekend_points.truncate(MAX_ANCHORS);
+
         self.lat = self.lat.clamp(-90.0, 90.0);
         self.lon = self.lon.clamp(-180.0, 180.0);
         self.sun_margin = self.sun_margin.min(180);
@@ -447,6 +456,16 @@ fn sample(raw: &[Anchor], minutes: f64, transition: u32) -> f64 {
 
 /* ------------------------------------------------------------------ 护眼计时 */
 
+/// 压暗默认持续几秒。
+///
+/// `rest_seconds` 是 20-20-20 里「看远处 20 秒」的休息时长，压暗只是提醒信号，
+/// 不该跟着占满 20 秒——那段时间里用户可能还想看清屏幕上的东西。默认几秒足够察觉。
+pub const DIM_SECONDS_DEFAULT: u32 = 6;
+/// 再短就只剩一闪，来不及分辨是屏幕变了还是眼睛花了。
+pub const DIM_SECONDS_MIN: u32 = 2;
+/// 上限压到一分钟。压更久不如直接把休息时长调长。
+pub const DIM_SECONDS_MAX: u32 = 60;
+
 /// 20-20-20：每工作 20 分钟，看 20 英尺外 20 秒。
 /// 这里只管「什么时候该提醒」，不强制锁屏。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -457,6 +476,10 @@ pub struct BreakPlan {
     /// 到点时把屏幕短暂调暖压暗，让提醒跑到屏幕上去，而不只是待在面板里
     #[serde(default = "default_true")]
     pub dim_screen: bool,
+    /// 压暗持续多少秒。和 `rest_seconds` 分开：提醒横幅占满整个休息时长，
+    /// 屏幕压暗只需要一瞬间让人察觉。老配置没有这个字段，按默认值补。
+    #[serde(default = "default_dim_seconds")]
+    pub dim_seconds: u32,
     /// 下次提醒的时间戳。None 表示计时暂停或还没开始
     #[serde(default)]
     pub due_at: Option<u64>,
@@ -466,6 +489,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_dim_seconds() -> u32 {
+    DIM_SECONDS_DEFAULT
+}
+
 impl Default for BreakPlan {
     fn default() -> Self {
         Self {
@@ -473,6 +500,7 @@ impl Default for BreakPlan {
             work_minutes: 20,
             rest_seconds: 20,
             dim_screen: true,
+            dim_seconds: DIM_SECONDS_DEFAULT,
             due_at: None,
         }
     }
@@ -495,6 +523,94 @@ impl BreakPlan {
     }
 }
 
+/* ------------------------------------------------------------ 逐屏设置 */
+
+/// 一块屏幕跟全局走、用自己的色温，还是用自己的滤色。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenMode {
+    #[default]
+    Follow,
+    Custom,
+    Filter,
+}
+
+/// 每块屏幕单独的设置。
+///
+/// 0.2 早期只有全局一个 `target`：挑一块屏应用同一份配置，换一块屏就覆盖。
+/// 现在每块屏都能单独决定「参不参与」「跟全局 / 用自己的色温 / 用自己的滤色」
+/// 「多亮」，`target` 保留成快捷的「只应用到某一块」过滤，两者叠加生效。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenConfig {
+    pub id: String,
+    /// false = 这块屏永远写回原色
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: ScreenMode,
+    #[serde(default)]
+    pub kelvin: Option<u32>,
+    #[serde(default)]
+    pub brightness: Option<f64>,
+    /// `mode = filter` 时用的 RGB。没填过就沿用全局滤色。
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+}
+
+impl ScreenConfig {
+    /// 没记过这块屏时给一份「参与、跟随全局」的默认，界面不用处理缺失项。
+    pub fn fallback(id: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            enabled: true,
+            mode: ScreenMode::Follow,
+            kelvin: None,
+            brightness: None,
+            color: None,
+        }
+    }
+}
+
+/* ---------------------------------------------------------- 在场与免打扰 */
+
+/// 空闲、全屏、演示模式，以及「真的停手了才记一次休息」。
+///
+/// 三项都默认开：这些是修正统计准确度的行为，不是需要用户主动发现的可选增强。
+/// 平台查不到输入空闲时自动退回旧的固定计时，不会静悄悄停掉提醒。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceConfig {
+    #[serde(default = "default_true")]
+    pub idle_aware: bool,
+    #[serde(default = "default_true")]
+    pub fullscreen_pause: bool,
+    #[serde(default = "default_true")]
+    pub real_rest: bool,
+    /// 演示模式截止的 Unix 秒；0 表示没开。到点自动失效，不用记得关。
+    #[serde(default)]
+    pub presentation_until: u64,
+}
+
+impl Default for PresenceConfig {
+    fn default() -> Self {
+        Self {
+            idle_aware: true,
+            fullscreen_pause: true,
+            real_rest: true,
+            presentation_until: 0,
+        }
+    }
+}
+
+/// 用眼建议开关。默认关：分析数据可以，但在用户点头之前不改任何配置。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 /* -------------------------------------------------------------------- 配置 */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -511,6 +627,13 @@ pub struct Config {
     pub break_plan: BreakPlan,
     #[serde(default)]
     pub custom_presets: Vec<CustomPreset>,
+    /// 逐屏设置。空表示全部沿用全局；老的 config.json 没有这个字段也能读。
+    #[serde(default)]
+    pub screens: Vec<ScreenConfig>,
+    #[serde(default)]
+    pub presence: PresenceConfig,
+    #[serde(default)]
+    pub insight: InsightConfig,
 }
 
 impl Default for Config {
@@ -527,6 +650,9 @@ impl Default for Config {
             schedule: Schedule::default(),
             break_plan: BreakPlan::default(),
             custom_presets: Vec::new(),
+            screens: Vec::new(),
+            presence: PresenceConfig::default(),
+            insight: InsightConfig::default(),
         }
     }
 }
@@ -536,10 +662,60 @@ impl Config {
         self.schedule.normalize();
         self.kelvin = self.kelvin.clamp(KELVIN_MIN, KELVIN_MAX);
         self.brightness = self.brightness.clamp(0.1, 1.0);
+
+        // 压暗时长来自界面输入或手改的 config.json，两种途径都兜一次
+        self.break_plan.dim_seconds = self
+            .break_plan
+            .dim_seconds
+            .clamp(DIM_SECONDS_MIN, DIM_SECONDS_MAX);
+
+        // 同一块屏只留一条记录，参数全部夹到合法范围
+        let mut seen = std::collections::HashSet::new();
+        self.screens.retain(|s| !s.id.is_empty() && seen.insert(s.id.clone()));
+        for screen in &mut self.screens {
+            screen.kelvin = screen.kelvin.map(|k| k.clamp(KELVIN_MIN, KELVIN_MAX));
+            screen.brightness = screen.brightness.map(|b| b.clamp(0.1, 1.0));
+        }
     }
 
     pub fn find_custom(&self, id: &str) -> Option<&CustomPreset> {
         self.custom_presets.iter().find(|p| p.id == id)
+    }
+
+    pub fn screen_for(&self, id: &str) -> ScreenConfig {
+        self.screens
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+            .unwrap_or_else(|| ScreenConfig::fallback(id))
+    }
+
+    /// 按当前显示器顺序补齐每屏设置，给界面一份不用处理缺项的列表。
+    pub fn screens_for(&self, ids: &[String]) -> Vec<ScreenConfig> {
+        ids.iter().map(|id| self.screen_for(id)).collect()
+    }
+
+    /// 写回单块屏的设置。返回 false 表示 id 为空。
+    pub fn set_screen(&mut self, next: ScreenConfig) -> bool {
+        if next.id.is_empty() {
+            return false;
+        }
+        if let Some(item) = self.screens.iter_mut().find(|s| s.id == next.id) {
+            *item = next;
+        } else {
+            self.screens.push(next);
+        }
+        true
+    }
+
+    /// 这块屏最终用多少亮度。
+    pub fn brightness_for(&self, screen: &ScreenConfig) -> f64 {
+        if screen.mode == ScreenMode::Custom {
+            screen.brightness.unwrap_or(self.brightness)
+        } else {
+            self.brightness
+        }
+        .clamp(0.1, 1.0)
     }
 }
 
@@ -593,6 +769,28 @@ pub fn resolve(cfg: &Config, moment: &Moment) -> Option<Tint> {
     }
 
     Some(Tint::Kelvin { kelvin: cfg.kelvin })
+}
+
+/// 某一块屏此刻该用什么。
+///
+/// `Filter` 用这块屏自己的 RGB；没存过颜色时先沿用全局滤色，
+/// 全局也不是滤色就退回白色，避免「切到滤色结果全屏发黑」。
+pub fn resolve_for(cfg: &Config, screen: &ScreenConfig, moment: &Moment) -> Option<Tint> {
+    if !cfg.enabled || !screen.enabled {
+        return None;
+    }
+    match screen.mode {
+        ScreenMode::Follow => resolve(cfg, moment),
+        ScreenMode::Custom => Some(Tint::Kelvin {
+            kelvin: screen.kelvin.unwrap_or(cfg.kelvin),
+        }),
+        ScreenMode::Filter => Some(Tint::Rgb {
+            rgb: screen
+                .color
+                .or(cfg.color)
+                .unwrap_or([255, 255, 255]),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -734,5 +932,148 @@ mod tests {
         assert!(remaining > 19 * 60 && remaining <= 20 * 60, "实际 {remaining}");
         plan.disarm();
         assert!(plan.remaining().is_none());
+    }
+
+    #[test]
+    fn 压暗默认比休息时长短() {
+        let plan = BreakPlan::default();
+        assert_eq!(plan.dim_seconds, DIM_SECONDS_DEFAULT);
+        assert!(
+            plan.dim_seconds < plan.rest_seconds,
+            "压暗只是提醒信号，不该占满整个休息时长"
+        );
+    }
+
+    #[test]
+    fn 压暗时长会被夹到合法范围() {
+        let mut cfg = Config::default();
+        cfg.break_plan.dim_seconds = 0;
+        cfg.normalize();
+        assert_eq!(cfg.break_plan.dim_seconds, DIM_SECONDS_MIN);
+
+        cfg.break_plan.dim_seconds = 999;
+        cfg.normalize();
+        assert_eq!(cfg.break_plan.dim_seconds, DIM_SECONDS_MAX);
+    }
+
+    #[test]
+    fn 老配置没有压暗时长时按默认补() {
+        let text = r#"{"enabled":true,"work_minutes":20,"rest_seconds":20,"dim_screen":true}"#;
+        let plan: BreakPlan = serde_json::from_str(text).expect("老字段应该还能读");
+        assert_eq!(plan.dim_seconds, DIM_SECONDS_DEFAULT);
+        assert!(plan.due_at.is_none());
+    }
+
+    #[test]
+    fn 锚点太多会被截到上限() {
+        let mut s = Schedule::default();
+        s.points = (0..30)
+            .map(|i| Anchor { at: i * 40, kelvin: 4000 })
+            .collect();
+        s.normalize();
+        assert_eq!(s.points.len(), MAX_ANCHORS);
+    }
+
+    #[test]
+    fn 单锚点曲线全天保持同一个色温() {
+        let mut s = Schedule::default();
+        s.points = vec![Anchor { at: 480, kelvin: 3800 }];
+        assert_eq!(s.kelvin_at(&Moment::weekday_at(3.0 * 60.0)), 3800.0);
+        assert_eq!(s.kelvin_at(&Moment::weekday_at(20.0 * 60.0)), 3800.0);
+    }
+
+    #[test]
+    fn 没记过的屏默认跟随全局() {
+        let cfg = Config::default();
+        let screen = cfg.screen_for("DP-9");
+        assert_eq!(screen.id, "DP-9");
+        assert!(screen.enabled);
+        assert_eq!(screen.mode, ScreenMode::Follow);
+    }
+
+    #[test]
+    fn 关掉的屏不参与调整() {
+        let cfg = Config::default();
+        let mut screen = cfg.screen_for("DP-1");
+        screen.enabled = false;
+        assert!(resolve_for(&cfg, &screen, &Moment::weekday_at(12.0 * 60.0)).is_none());
+    }
+
+    #[test]
+    fn 独立屏用自己的色温和亮度() {
+        let mut cfg = Config::default();
+        let mut screen = cfg.screen_for("DP-1");
+        screen.mode = ScreenMode::Custom;
+        screen.kelvin = Some(3000);
+        screen.brightness = Some(0.5);
+        cfg.set_screen(screen.clone());
+        cfg.normalize();
+
+        match resolve_for(&cfg, &screen, &Moment::weekday_at(12.0 * 60.0)) {
+            Some(Tint::Kelvin { kelvin }) => assert_eq!(kelvin, 3000),
+            other => panic!("实际 {other:?}"),
+        }
+        assert_eq!(cfg.brightness_for(&screen), 0.5);
+    }
+
+    #[test]
+    fn 独立屏用自己的滤色() {
+        let mut cfg = Config::default();
+        let mut screen = cfg.screen_for("DP-1");
+        screen.mode = ScreenMode::Filter;
+        screen.color = Some([199, 237, 204]);
+        cfg.set_screen(screen.clone());
+
+        match resolve_for(&cfg, &screen, &Moment::weekday_at(12.0 * 60.0)) {
+            Some(Tint::Rgb { rgb }) => assert_eq!(rgb, [199, 237, 204]),
+            other => panic!("实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 逐屏滤色没存颜色时沿用全局() {
+        let mut cfg = Config::default();
+        cfg.color = Some([250, 235, 210]);
+        let mut screen = cfg.screen_for("DP-1");
+        screen.mode = ScreenMode::Filter;
+        cfg.set_screen(screen.clone());
+
+        match resolve_for(&cfg, &screen, &Moment::weekday_at(12.0 * 60.0)) {
+            Some(Tint::Rgb { rgb }) => assert_eq!(rgb, [250, 235, 210]),
+            other => panic!("实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 逐屏滤色没存颜色也没有全局滤色时退回白色() {
+        let mut cfg = Config::default();
+        let mut screen = cfg.screen_for("DP-1");
+        screen.mode = ScreenMode::Filter;
+        cfg.set_screen(screen.clone());
+
+        match resolve_for(&cfg, &screen, &Moment::weekday_at(12.0 * 60.0)) {
+            Some(Tint::Rgb { rgb }) => assert_eq!(rgb, [255, 255, 255]),
+            other => panic!("实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 逐屏设置去重且夹紧范围() {
+        let mut cfg = Config::default();
+        let mk = |kelvin| ScreenConfig {
+            id: "DP-1".to_string(),
+            enabled: true,
+            mode: ScreenMode::Custom,
+            kelvin: Some(kelvin),
+            brightness: Some(9.0),
+            color: None,
+        };
+        cfg.set_screen(mk(999));
+        cfg.set_screen(mk(4500));
+        cfg.normalize();
+
+        assert_eq!(cfg.screens.len(), 1, "同 id 只留一条");
+        assert_eq!(cfg.screens[0].kelvin, Some(4500));
+        assert_eq!(cfg.screens[0].brightness, Some(1.0));
     }
 }

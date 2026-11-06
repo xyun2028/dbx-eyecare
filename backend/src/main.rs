@@ -5,7 +5,9 @@
 
 mod color;
 mod gamma;
+mod insight;
 mod model;
+mod presence;
 mod protocol;
 mod rpc;
 mod state;
@@ -19,7 +21,10 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use crate::protocol::{emit_error, emit_event, emit_result, log_line, SharedWriter};
-use crate::state::{apply_now, begin_rest, clear_backup, data_root, restore_all, AppState};
+use crate::state::{
+    apply_now, begin_rest, clear_backup, data_root, gamma_conflict_id, restore_all, settle_rest,
+    AppState, RestPending,
+};
 
 /// 后台循环的间隔。改屏、计时、统计都按这个粒度推进。
 const TICK: u64 = 5;
@@ -57,48 +62,120 @@ fn main() {
         let state = Arc::clone(&state);
         let out = Arc::clone(&out);
         let mut ticks: u64 = 0;
+        let mut conflict_seen = false;
+        let mut last_tick = model::now_secs();
 
         std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(TICK));
-            ticks += 1;
+            // 休息时的压暗只有几秒，整拍睡会把这段压暗拖到下一拍（最坏多出 TICK 秒）。
+            // 有正在进行的休息就只睡到它结束的那一刻，让配置的秒数说到做到。
+            let nap = {
+                let mut guard = state.rest_until.lock().unwrap();
+                match *guard {
+                    Some(end) => {
+                        let remain = end.saturating_sub(model::now_secs());
+                        if remain == 0 {
+                            // 已经过期：就地清掉。留着会让下面的睡眠一直是 1 秒，
+                            // 投屏或全屏期间就成了每秒一次的循环
+                            *guard = None;
+                            TICK
+                        } else {
+                            TICK.min(remain)
+                        }
+                    }
+                    None => TICK,
+                }
+            };
+            std::thread::sleep(Duration::from_secs(nap));
 
-            let cfg = state.config();
             let now = model::now_secs();
+            // 睡眠可能被切短，暂停计时只能按真实经过的秒数往后推，不能一律加 TICK
+            let elapsed = now.saturating_sub(last_tick).max(1);
+            last_tick = now;
+            ticks += 1;
+            let activity = presence::probe();
+            let cfg = state.config();
+            let rule = &cfg.presence;
 
-            // 关掉护眼时不计时，但心跳照走，否则重新打开会把中间那段也算进来
-            state.stats.lock().unwrap().tick(now, cfg.enabled);
+            let idle = rule.idle_aware && activity.is_idle();
+            let fullscreen = rule.fullscreen_pause && activity.fullscreen;
+            let presentation = now < rule.presentation_until;
+            // 「人不在 / 全屏内容 / 演示」这三种情况都不该弹休息提醒。
+            // 全屏和演示还会暂停写屏，避免在投屏或游戏里反复改 Gamma 表。
+            let away = idle || fullscreen || presentation;
+            let pause_writing = fullscreen || presentation;
 
-            // 关闭状态下不要反复写屏，否则会盖掉用户自己的调整
-            if cfg.enabled {
+            // 用眼时长只在护眼开着、且人确实在电脑前时累加。
+            // 全屏看视频和投屏演示仍然算用眼，不排除。
+            state.stats.lock().unwrap().tick(now, cfg.enabled && !idle);
+
+            // 先结算上一次休息：到点不记，确认停手了才记
+            settle_rest(&state, now, activity.idle_secs, rule.real_rest);
+
+            // 暂停期间把到期时间往后推，等效于计时冻结。
+            // 只改内存，不每次写盘；到刷新统计的那一拍顺手落一次。
+            if away {
+                let mut guard = state.config.lock().unwrap();
+                if let Some(due) = guard.break_plan.due_at.as_mut() {
+                    *due = due.saturating_add(elapsed);
+                }
+            }
+            let cfg = state.config();
+
+            if cfg.enabled && !pause_writing {
                 apply_now(&state, &cfg);
             }
 
-            if cfg.break_plan.enabled {
+            let conflict = gamma_conflict_id(&state);
+            if conflict.is_some() && !conflict_seen {
+                emit_event(
+                    &out,
+                    "evt/gamma.conflict",
+                    json!({ "display": conflict.clone(), "at": now }),
+                );
+            }
+            conflict_seen = conflict.is_some();
+
+            if cfg.break_plan.enabled && !away {
                 if let Some(due) = cfg.break_plan.due_at {
                     if now >= due {
                         let rest = cfg.break_plan.rest_seconds.max(1) as u64;
+                        let dim = cfg
+                            .break_plan
+                            .dim_seconds
+                            .clamp(model::DIM_SECONDS_MIN, model::DIM_SECONDS_MAX)
+                            as u64;
 
                         emit_event(
                             &out,
                             "evt/break.due",
                             json!({
                                 "restSeconds": rest,
+                                "dimSeconds": dim,
                                 "dimScreen": cfg.break_plan.dim_screen,
                                 "at": now,
                             }),
                         );
 
                         // 面板可能根本没人看着，所以提醒要落到屏幕上：
-                        // 这一段时间的屏幕会比平时更暖更暗，想忽略都难
+                        // 这一段时间的屏幕会比平时更暖更暗，想忽略都难。
+                        // 时长只取 dim_seconds，跟休息时长解耦——压 20 秒太碍事。
                         if cfg.break_plan.dim_screen && cfg.enabled {
-                            begin_rest(&state, rest);
+                            begin_rest(&state, dim);
                             apply_now(&state, &cfg);
                         }
 
-                        state.stats.lock().unwrap().took_break();
+                        if rule.real_rest && activity.idle_supported() {
+                            *state.rest_pending.lock().unwrap() = Some(RestPending {
+                                until: now + rest,
+                                required_secs: rest,
+                            });
+                        } else {
+                            state.stats.lock().unwrap().took_break();
+                        }
 
                         let mut next = cfg.clone();
-                        next.break_plan.due_at = Some(now + cfg.break_plan.work_minutes.max(1) as u64 * 60);
+                        next.break_plan.due_at =
+                            Some(now + cfg.break_plan.work_minutes.max(1) as u64 * 60);
                         *state.config.lock().unwrap() = next;
                         state.persist();
                     }
@@ -107,6 +184,9 @@ fn main() {
 
             if ticks % STATS_FLUSH_TICKS == 0 {
                 state.persist_stats();
+                if away {
+                    state.persist();
+                }
             }
         });
     }

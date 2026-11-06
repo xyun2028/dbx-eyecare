@@ -200,7 +200,8 @@ h1 {
   grid-template-columns: minmax(280px, 1.15fr) minmax(212px, 1fr) minmax(228px, 0.9fr);
   grid-template-areas:
     "control presets break"
-    "curve curve stats";
+    "curve curve stats"
+    "settings settings settings";
 }
 
 .control {
@@ -237,7 +238,8 @@ h1 {
     grid-template-areas:
       "control presets"
       "break stats"
-      "curve curve";
+      "curve curve"
+      "settings settings";
   }
 }
 
@@ -249,7 +251,8 @@ h1 {
       "presets"
       "break"
       "curve"
-      "stats";
+      "stats"
+      "settings";
   }
 }
 
@@ -1018,4 +1021,529 @@ input:disabled {
 .tag.mock {
   color: var(--accent);
   border-color: var(--accent-line);
+}
+
+/* -------------------------------------------------- 0.2.0 新增：逐屏与免打扰 */
+
+.conflict-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.conflict-note #conflictText {
+  flex: 1;
+}
+
+.settings-card {
+  grid-area: settings;
+  min-width: 0;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(240px, 0.85fr);
+  gap: 18px;
+}
+
+@media (max-width: 660px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.settings-col {
+  min-width: 0;
+}
+
+.col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.screen-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.screen-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 34px 74px 74px 62px 62px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.screen-row.off {
+  opacity: 0.55;
+}
+
+.screen-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+.screen-name small {
+  display: block;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.screen-row select,
+.screen-row input {
+  width: 100%;
+  min-width: 0;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 5px;
+  font-size: 11px;
+  font-family: inherit;
+}
+
+.screen-row input:disabled,
+.screen-row select:disabled {
+  opacity: 0.45;
+}
+
+/* 色温数字和取色器共用同一个格子，按屏幕模式二选一显示 */
+.screen-value {
+  position: relative;
+  min-width: 0;
+  height: 24px;
+}
+
+.screen-value input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 24px;
+}
+
+.screen-row input[type="color"] {
+  padding: 1px 2px;
+  cursor: pointer;
+}
+
+.screen-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 5px;
+  border: 1px solid var(--line-strong);
+  vertical-align: middle;
+}
+
+/* 屏幕开关比主开关小一号，一行里放得下 */
+.screen-row .switch {
+  width: 28px;
+  height: 16px;
+}
+
+.screen-row .switch .knob {
+  width: 12px;
+  height: 12px;
+  top: 2px;
+  left: 2px;
+}
+
+.screen-row .switch.on .knob {
+  transform: translateX(12px);
+}
+
+.sun-countdown {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--accent);
+  min-height: 17px;
+}
+
+.insight {
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.insight-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.insight .hint {
+  margin: 6px 0 0;
+}
+
+.insight #insightApply {
+  margin: 8px 0 0;
+}
+
+/* ------------------------------------------- 首页「使用说明」按钮与说明弹框 */
+/* 说明整篇写在 index.html 里：沙箱 iframe 没网络、没磁盘，不能外链文档。 */
+
+:root {
+  --help-scrim: rgba(8, 11, 15, 0.72);
+  --help-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme="light"] {
+  --help-scrim: rgba(24, 36, 32, 0.38);
+  --help-shadow: 0 18px 50px rgba(16, 32, 26, 0.22);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.help-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 11px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.help-trigger:hover,
+.help-trigger:focus-visible {
+  border-color: var(--accent-line);
+  color: var(--accent);
+  outline: none;
+}
+
+.help-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  font-size: 10px;
+  line-height: 1;
+  flex: none;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: var(--help-scrim);
+  backdrop-filter: blur(3px);
+}
+
+.help-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  height: min(86vh, 860px);
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  box-shadow: var(--help-shadow);
+  outline: none;
+  overflow: hidden;
+}
+
+.help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.help-heading {
+  min-width: 0;
+}
+
+.help-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.help-head p {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.help-close {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--dim);
+  font-size: 18px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.help-close:hover {
+  border-color: var(--accent-line);
+  color: var(--accent);
+}
+
+.help-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  flex: none;
+}
+
+.help-nav button {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 10.5px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.help-nav button:hover,
+.help-nav button:focus-visible {
+  border-color: var(--accent-line);
+  color: var(--accent);
+  outline: none;
+}
+
+.help-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 18px 22px;
+  scroll-behavior: smooth;
+  /* 全局为了控制面板关掉了选中，说明书要能选中复制 */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.help-lead {
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.help-sec {
+  padding: 14px 0 16px;
+  border-bottom: 1px solid var(--line);
+  scroll-margin-top: 8px;
+}
+
+.help-sec:last-child {
+  border-bottom: none;
+}
+
+.help-sec h3 {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--accent);
+}
+
+.help-sec p,
+.help-sec li,
+.help-sec td,
+.help-sec th {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.help-sec p {
+  margin: 6px 0;
+}
+
+.help-sec ul,
+.help-sec ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.help-sec li {
+  margin: 3px 0;
+}
+
+.help-sec strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.help-sec code,
+.help-sec kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+}
+
+.help-sec kbd {
+  font-family: inherit;
+}
+
+.help-note {
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--accent-soft);
+  color: var(--text-soft) !important;
+  font-size: 11.5px !important;
+}
+
+.help-steps li {
+  margin: 5px 0;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+.help-table th,
+.help-table td {
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.help-table th {
+  background: var(--surface-2);
+  color: var(--dim) !important;
+  font-weight: 500;
+  font-size: 11px !important;
+  white-space: nowrap;
+}
+
+.help-table td:first-child {
+  white-space: nowrap;
+  color: var(--dim) !important;
+}
+
+.qa {
+  margin: 8px 0;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+.qa .q {
+  margin: 0 0 3px;
+  font-weight: 600;
+  color: var(--text) !important;
+}
+
+.qa .a {
+  margin: 0;
+  color: var(--dim) !important;
+  font-size: 11.5px !important;
+}
+
+.help-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--faint);
+  font-size: 10.5px;
+  flex: none;
+}
+
+.help-foot span {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 660px) {
+  .help-overlay {
+    padding: 8px;
+  }
+
+  .help-dialog {
+    height: min(94vh, 860px);
+  }
+
+  .help-head,
+  .help-nav,
+  .help-body,
+  .help-foot {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .help-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .help-label {
+    display: none;
+  }
+
+  .help-trigger {
+    padding: 4px 6px;
+  }
 }

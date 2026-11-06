@@ -25,13 +25,22 @@
           <p id="sub" class="sub">正在连接…</p>
         </div>
       </div>
-      <button id="enabled" class="switch" role="switch" aria-checked="false" title="开关护眼">
-        <span class="knob"></span>
-      </button>
+      <div class="head-actions">
+        <button id="helpBtn" class="help-trigger" type="button" title="打开使用说明" aria-label="打开使用说明">
+          <span class="help-mark" aria-hidden="true">?</span><span class="help-label">使用说明</span>
+        </button>
+        <button id="enabled" class="switch" role="switch" aria-checked="false" title="开关护眼">
+          <span class="knob"></span>
+        </button>
+      </div>
     </header>
 
     <p id="supportNote" class="note blocked hidden"></p>
     <p id="hdrNote" class="note hidden"></p>
+    <div id="conflictNote" class="note blocked hidden conflict-note">
+      <span id="conflictText"></span>
+      <button id="gammaResume" class="ghost compact">重新接管</button>
+    </div>
 
     <main class="grid">
       <!-- ------------------------------------------------------------ 手动控制 -->
@@ -97,11 +106,21 @@
         </div>
         <div class="row compact">
           <label class="row-label grow">休息时调暗</label>
+          <input
+            id="dimSeconds"
+            class="num small"
+            type="number"
+            min="2"
+            max="60"
+            step="1"
+            title="压暗持续多少秒"
+          />
+          <span class="unit">秒</span>
           <button id="dimScreen" class="switch" role="switch" aria-checked="true" title="休息时把屏幕调暖压暗">
             <span class="knob"></span>
           </button>
         </div>
-        <p class="hint tight">到点时屏幕短暂变暖变暗，不打开面板也能察觉</p>
+        <p class="hint tight">到点时屏幕短暂变暖变暗，几秒后自动恢复，不打开面板也能察觉</p>
       </section>
 
       <!-- ------------------------------------------------------------ 曲线 -->
@@ -130,6 +149,8 @@
           </svg>
         </div>
 
+        <p id="sunCountdown" class="sun-countdown"></p>
+
         <div class="curve-foot">
           <div class="seg small" id="daySeg">
             <button type="button" data-day="weekday">工作日</button>
@@ -148,8 +169,11 @@
           <input id="anchorTime" type="time" />
           <input id="anchorK" class="num" type="number" min="1000" max="6500" step="50" />
           <span class="unit">K</span>
-          <span id="anchorHint" class="muted">点曲线上的圆点选中，拖动可改时间和色温</span>
+          <button id="anchorAdd" class="ghost compact" title="在选中点附近加一个锚点">＋ 添加</button>
+          <button id="anchorDel" class="ghost compact" title="删除选中的锚点">删除</button>
+          <span id="anchorCount" class="muted"></span>
         </div>
+        <p id="anchorHint" class="hint tight"></p>
       </section>
 
       <!-- ------------------------------------------------------------ 用眼 -->
@@ -164,6 +188,62 @@
         <p id="todayMeta" class="muted">今天还没有记录</p>
         <div id="weekBars" class="week-bars"></div>
         <p class="muted week-cap">最近七天</p>
+
+        <div class="insight">
+          <div class="insight-head">
+            <span class="row-label grow">用眼建议</span>
+            <button id="insightOn" class="switch" role="switch" aria-checked="false" title="分析用眼记录并给出建议">
+              <span class="knob"></span>
+            </button>
+          </div>
+          <p id="insightText" class="hint tight"></p>
+          <button id="insightApply" class="ghost compact hidden">应用建议</button>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------ 逐屏设置与免打扰 -->
+      <section class="card settings-card">
+        <div class="card-head">
+          <h2>逐屏与免打扰</h2>
+          <span class="muted">设置只存在本机</span>
+        </div>
+        <div class="settings-grid">
+          <div class="settings-col">
+            <div class="col-head">
+              <span class="row-label">每块屏单独设置</span>
+              <span id="screenHint" class="muted"></span>
+            </div>
+            <div id="screenRows" class="screen-rows"></div>
+            <p class="hint tight">「应用到」是快捷范围；关掉的屏保持原色。「独立」用自己色温，「滤色」用自己取的颜色，第四列随模式切换，第五列是亮度(%)。</p>
+          </div>
+
+          <div class="settings-col">
+            <div class="col-head"><span class="row-label">什么时候不打扰你</span></div>
+            <div class="row compact">
+              <label class="row-label grow">人离开时暂停计时</label>
+              <button id="idleAware" class="switch" role="switch" aria-checked="true" title="超过两分钟没碰键鼠就暂停提醒和用眼计时">
+                <span class="knob"></span>
+              </button>
+            </div>
+            <div class="row compact">
+              <label class="row-label grow">全屏内容时让位</label>
+              <button id="fullscreenPause" class="switch" role="switch" aria-checked="true" title="全屏游戏、播放器、演示时暂停写屏和提醒">
+                <span class="knob"></span>
+              </button>
+            </div>
+            <div class="row compact">
+              <label class="row-label grow">真的停手才记休息</label>
+              <button id="realRest" class="switch" role="switch" aria-checked="true" title="休息期间还在用电脑就不计入休息次数">
+                <span class="knob"></span>
+              </button>
+            </div>
+            <div class="row compact">
+              <label class="row-label grow">演示模式</label>
+              <button id="presentation" class="ghost compact">暂停 60 分钟</button>
+            </div>
+            <p id="presenceNote" class="hint tight"></p>
+          </div>
+        </div>
       </section>
     </main>
 
@@ -171,6 +251,177 @@
       <span id="hostMode" class="tag">连接中</span>
       <span>调的是显示器 Gamma 表，不盖遮罩；开了 HDR 的屏幕不生效</span>
     </footer>
+
+    <!-- ------------------------------------------------------- 使用说明书 -->
+    <!-- 沙箱 iframe 没有网络也没有磁盘，说明必须整篇写在页面里。 -->
+    <div id="helpOverlay" class="help-overlay hidden">
+      <div id="helpDialog" class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="helpTitle" tabindex="-1">
+        <div class="help-head">
+          <div class="help-heading">
+            <h2 id="helpTitle">Eye眼 · 使用说明</h2>
+            <p>0.2.0 · 全部功能在本机运行 · 随时点首页右上角「使用说明」回来查</p>
+          </div>
+          <button id="helpClose" class="help-close" type="button" aria-label="关闭使用说明" title="关闭（Esc）">×</button>
+        </div>
+
+        <nav class="help-nav" aria-label="章节导航">
+          <button type="button" data-jump="helpStart">快速开始</button>
+          <button type="button" data-jump="helpPanel">面板速览</button>
+          <button type="button" data-jump="helpTint">手动调色</button>
+          <button type="button" data-jump="helpPreset">预设</button>
+          <button type="button" data-jump="helpCurve">24 小时曲线</button>
+          <button type="button" data-jump="helpBreak">20-20-20</button>
+          <button type="button" data-jump="helpScreens">逐屏与免打扰</button>
+          <button type="button" data-jump="helpStats">用眼与建议</button>
+          <button type="button" data-jump="helpPrivacy">隐私与数据</button>
+          <button type="button" data-jump="helpFaq">常见问题</button>
+          <button type="button" data-jump="helpLimits">已知限制</button>
+        </nav>
+
+        <div id="helpBody" class="help-body">
+          <p class="help-lead">
+            Eye眼改的是<strong>显示器的 Gamma 查找表</strong>，不是在屏幕上盖一层半透明色板。
+            所以黑色还是黑色、画面不发灰，也不会挡住任何窗口。它只管「屏幕发什么色」，
+            顺便按 20-20-20 提醒你抬头看远处。
+          </p>
+
+          <section id="helpStart" class="help-sec">
+            <h3>01 · 快速开始</h3>
+            <ol class="help-steps">
+              <li>点<strong>右上角的总开关</strong>打开护眼。关掉它，屏幕会还原成原来的颜色。</li>
+              <li>拖<strong>色温</strong>滑杆，或直接点一个<strong>预设</strong>。数值越小越暖、越偏橙；6500K 接近原色。</li>
+              <li>想让颜色跟着时间自己变，去「24 小时曲线」卡片打开<strong>「按时间自动」</strong>开关。</li>
+              <li>想收到休息提醒，去「20-20-20」卡片打开开关。默认每 20 分钟一轮。</li>
+            </ol>
+            <p class="help-note">「按时间自动」和「20-20-20」是两个独立开关：前者管颜色，后者管提醒，互不影响。</p>
+          </section>
+
+          <section id="helpPanel" class="help-sec">
+            <h3>02 · 面板速览</h3>
+            <table class="help-table">
+              <thead><tr><th>卡片</th><th>用来做什么</th></tr></thead>
+              <tbody>
+                <tr><td>色温</td><td>手动调色温、颜色、亮度，选「应用到」哪几块屏</td></tr>
+                <tr><td>预设</td><td>一键套用常用配色，也能把当前配色存起来</td></tr>
+                <tr><td>20-20-20</td><td>休息倒计时、间隔、跳过、休息时是否调暗</td></tr>
+                <tr><td>24 小时曲线</td><td>按钟点或日出日落自动变色，锚点增删与过渡</td></tr>
+                <tr><td>用眼</td><td>今天用了多久、休息几次、最近七天，以及用眼建议</td></tr>
+                <tr><td>逐屏与免打扰</td><td>每块屏单独设，以及什么时候不打扰你</td></tr>
+              </tbody>
+            </table>
+            <p>首页右上角的「手动 / 自动 / 跟随日光」小标签，显示的是当前颜色的来源。</p>
+          </section>
+
+          <section id="helpTint" class="help-sec">
+            <h3>03 · 手动调色</h3>
+            <ul>
+              <li><strong>色温</strong>：1000–6500K。往左更暖，适合晚上；往右接近屏幕原色。</li>
+              <li><strong>颜色</strong>：点取色器选任意颜色，会立刻切到「滤色」模式，此时顶部大数字变成色块，色温滑杆变淡表示它暂时不参与取值。想回到色温，拖一下色温滑杆或点一个色温预设即可。</li>
+              <li><strong>亮度</strong>：10–100%。这是 Gamma 表里的亮度，<strong>不是显示器背光</strong>，不会让面板本身变暗或更省电，拉到底也不会像关灯。</li>
+              <li><strong>应用到</strong>：一个快捷范围选择（全部屏幕 / 某一块屏）。它是筛选，不是逐屏配置；想给每块屏不同的颜色，用「逐屏与免打扰」卡片。</li>
+            </ul>
+          </section>
+
+          <section id="helpPreset" class="help-sec">
+            <h3>04 · 预设</h3>
+            <p>内置七个：原色、轻度、办公、夜间、睡前、豆沙绿、纸质暖黄。前五个是色温，后两个是滤色。点一下就生效。</p>
+            <p>调出满意的配色后，点「存为预设」，起个名字保存，色温（或颜色）和亮度会一起记下来。自己存的预设把鼠标移上去，右上角会出现 <code>×</code>，点它删除；内置预设删不掉。</p>
+          </section>
+
+          <section id="helpCurve" class="help-sec">
+            <h3>05 · 24 小时曲线</h3>
+            <p>曲线上每个圆点是一个<strong>锚点</strong>：某个时刻对应某个色温。两个锚点之间颜色保持不变，只在快到下一个锚点前按「过渡」分钟数慢慢变过去，不会一整天都在飘。</p>
+            <ul>
+              <li><strong>按时间自动</strong>：卡片右上角的开关。不打开，曲线画得再好也不生效，屏幕仍用手动值。</li>
+              <li><strong>钟点 / 日出日落</strong>：钟点模式用你自己摆的锚点；日出日落模式按当地日出日落自动生成锚点。</li>
+              <li><strong>锚点增删</strong>：拖动曲线上的圆点改时刻和色温；选中后用下方的时间、K 输入框精确填；「＋ 添加」在选中点附近加一个，「删除」去掉选中的那个。至少留 1 个、最多 12 个。</li>
+              <li><strong>过渡</strong>：0–180 分钟，决定提前多久开始向下一个锚点渐变。</li>
+              <li><strong>工作日 / 周末</strong>：两套曲线。周末单独设过之后，点旁边的「恢复跟随工作日」就能并回一套。</li>
+              <li><strong>转暖倒数</strong>：曲线下方显示距离下一次变暖还有多久；日出日落模式下跟着当天日落走。</li>
+            </ul>
+            <p class="help-note">日出日落模式按配置文件里的经纬度算，本机算、不联网、不要定位权限。当前版本的面板<strong>没有经纬度输入框</strong>，需要改数据目录里 <code>config.json</code> 的 <code>lat</code> / <code>lon</code>。</p>
+          </section>
+
+          <section id="helpBreak" class="help-sec">
+            <h3>06 · 20-20-20 与休息提醒</h3>
+            <p>这条经验法则是：每连续看近处 <strong>20 分钟</strong>，看 <strong>20 英尺（约 6 米）外</strong>至少 <strong>20 秒</strong>，让睫状肌从近距离调节里松一松。它是缓解视疲劳的习惯，不是治疗近视的方案。</p>
+            <ul>
+              <li>默认固定 <strong>20 分钟一轮</strong>，在「间隔」里可改成 1–180 分钟。人离开、全屏或演示时只会把到点时间<strong>往后顺延</strong>，回来接着算，不会重置整轮。</li>
+              <li>到点时屏幕会短暂变暖压暗，默认 6 秒后自动恢复，不打开面板也能察觉；旁边的秒数输入框能改成 2–60 秒。横幅上是休息倒数。不想要这个效果，关掉「休息时调暗」，只留横幅。</li>
+              <li>「跳过这次」把这一轮跳过去。开着「真的停手才记休息」时，休息期间还在敲键鼠，这一次就不计入「休息了几次」。</li>
+            </ul>
+            <p class="help-note">「休息了几次」只统计护眼开启期间、确实触发过的休息，是全插件里最不精确的一个数，看看趋势就好。</p>
+          </section>
+
+          <section id="helpScreens" class="help-sec">
+            <h3>07 · 逐屏与免打扰</h3>
+            <p>「每块屏单独设置」里，每行从左到右是：屏幕名、参与开关、模式、取值、亮度、当前生效。</p>
+            <table class="help-table">
+              <thead><tr><th>模式</th><th>含义</th></tr></thead>
+              <tbody>
+                <tr><td>跟随</td><td>用全局色温 / 曲线，取值列显示当前跟随值，不能改</td></tr>
+                <tr><td>独立</td><td>这块屏用自己的色温，忽略全局设置</td></tr>
+                <tr><td>滤色</td><td>这块屏用自己的颜色，取值列变成取色器</td></tr>
+              </tbody>
+            </table>
+            <p>关掉某块屏的开关，它就保持原色；「应用到」只是快速把范围收窄到一块屏，两者叠加时以逐屏设置为准。</p>
+            <ul>
+              <li><strong>人离开时暂停计时</strong>：超过两分钟没碰键鼠，暂停提醒和用眼计时。查不到空闲信息的平台按「人在」处理，不会悄悄停掉提醒。</li>
+              <li><strong>全屏内容时让位</strong>：前台是全屏游戏、播放器、演示时，暂停写屏和提醒。</li>
+              <li><strong>演示模式</strong>：一键暂停 60 分钟，适合投屏开会，到点自动恢复；再点一次可提前结束。</li>
+              <li><strong>抢桌检测</strong>：写屏前会读回 Gamma 表，发现被 f.lux、Night Shift、显卡驱动之类改过，就暂停写屏并在页面顶部提示。确认后点「重新接管」继续。</li>
+            </ul>
+          </section>
+
+          <section id="helpStats" class="help-sec">
+            <h3>08 · 用眼记录与用眼建议</h3>
+            <p>「用眼」卡片显示今天累计时长、休息次数、最长连续时长和最近七天的柱状图。记录按天存，只保留最近 30 天；人离开的时段不算进去。</p>
+            <p><strong>用眼建议默认关闭。</strong>打开后才分析本机记录，找出最容易连续用眼的时段，攒够至少 3 天带钟点的数据才给结论。它只给一句话和一个「应用建议」按钮，不打开就完全不分析。</p>
+            <p class="help-note">点「应用建议」<strong>只会往曲线里加（或更新）一个锚点</strong>，不会替你打开「按时间自动」。想让它生效，要自己去曲线卡片把那个开关打开。日出日落模式下、附近已有锚点或锚点已经到 12 个时，按钮不会出现或会提示加不上。</p>
+          </section>
+
+          <section id="helpPrivacy" class="help-sec">
+            <h3>09 · 隐私与数据</h3>
+            <ul>
+              <li><strong>不联网</strong>：插件只申请了工作台和事件两个宿主能力，没有网络权限，日出日落也是本机按公式算的。</li>
+              <li><strong>不读窗口标题、不记按键内容、不订阅输入事件</strong>：在场感知只查询「距上次键鼠输入多少秒」和前台窗口的矩形大小，用来判断人是否离开、是否全屏。</li>
+              <li><strong>不起子进程、不监听端口</strong>：侧车只通过标准输入输出和宿主讲 JSON-RPC。</li>
+              <li><strong>数据全在本机</strong>：宿主指定的数据目录里只有三个文件——<code>config.json</code>（配置）、<code>stats.json</code>（用眼记录）、<code>original_ramp.txt</code>（改屏前拍下的原始 Gamma 表）。</li>
+              <li><strong>能还原</strong>：关掉总开关、正常退出插件，屏幕都会还原成原始 Gamma 表。万一插件被强杀来不及清理，下次启动会先按备份还原再继续，不会让屏幕一直偏色。</li>
+            </ul>
+          </section>
+
+          <section id="helpFaq" class="help-sec">
+            <h3>10 · 常见问题</h3>
+            <div class="qa"><p class="q">开关开了，屏幕没变化？</p><p class="a">依次看：总开关是否打开；该屏在「逐屏」里是否被关掉或「应用到」被收窄；是不是开了 HDR；是不是正在独占全屏；页面顶部有没有 Gamma 冲突提示。Wayland 会话明确不支持，面板会直接写明原因。</p></div>
+            <div class="qa"><p class="q">HDR 屏为什么不变色？</p><p class="a">系统在 HDR 下会绕过 Gamma 表，这是系统行为，插件改不了。关掉 HDR 才生效。</p></div>
+            <div class="qa"><p class="q">装了 f.lux / Night Shift / 显卡自带护眼，颜色互相跳？</p><p class="a">只留一个。插件检测到 Gamma 表被别人改过会自动暂停写屏，页面上出现提示，点「重新接管」才继续。</p></div>
+            <div class="qa"><p class="q">多屏只有一块变色？</p><p class="a">看「逐屏与免打扰」里每块屏的开关和模式，以及手动控制里的「应用到」范围。</p></div>
+            <div class="qa"><p class="q">亮度拉到 10% 屏幕还是刺眼？</p><p class="a">这个亮度改的是 Gamma 表，不是背光。想真正变暗请用系统亮度或显示器按键。</p></div>
+            <div class="qa"><p class="q">应用了用眼建议，颜色没变？</p><p class="a">建议只加锚点，还要自己去曲线卡片打开「按时间自动」。</p></div>
+            <div class="qa"><p class="q">离开一会儿回来马上又提醒？</p><p class="a">空闲只把到点时间往后顺延，不重置一轮。开会可用「演示模式」暂停 60 分钟。</p></div>
+            <div class="qa"><p class="q">日出日落时间不准？</p><p class="a">检查 <code>config.json</code> 的 <code>lat</code> / <code>lon</code>；当前面板没有输入控件，也没有城市列表。</p></div>
+            <div class="qa"><p class="q">关掉插件后屏幕还偏色？</p><p class="a">正常退出会还原。若是强杀，重新打开插件一次让它读备份还原，再关掉即可；实在不行重启系统也会重置 Gamma 表。</p></div>
+          </section>
+
+          <section id="helpLimits" class="help-sec">
+            <h3>11 · 已知限制</h3>
+            <ul>
+              <li>HDR 开启、独占全屏程序会绕过 Gamma 表，属正常现象。</li>
+              <li>Linux Wayland 没有公开接口改 Gamma，插件会直接说明不支持；XWayland 里改的是它自己那份表，桌面不变。</li>
+              <li>macOS 上「全屏内容时让位」尚未实现，空闲暂停仍然可用；查不到空闲信息的平台一律按「人在」处理。</li>
+              <li>日出日落模式需要手填经纬度，面板暂无输入框和城市列表。</li>
+              <li>本说明整篇随插件打包，不联网也能看；按 <kbd>Esc</kbd> 或点弹框外的空白处关闭，文字可选中复制。</li>
+            </ul>
+          </section>
+        </div>
+
+        <div class="help-foot">
+          <span>说明随插件一起安装，离线可用。设置与记录只存在这台机器上。</span>
+          <button id="helpBottomClose" class="ghost compact" type="button">看完了，关闭</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module" src="app.js"></script>
   </body>

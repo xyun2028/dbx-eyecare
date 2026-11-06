@@ -1,5 +1,6 @@
 //! 插件状态、持久化，以及「把配置真正写到屏幕上」。
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::color::{build_gamma_ramp, build_gamma_ramp_rgb};
 use crate::gamma::{self, Ramp};
-use crate::model::{self, resolve, Config, Moment, Tint};
+use crate::model::{self, resolve_for, Config, Moment, ScreenConfig, Tint};
 use crate::stats::Stats;
 
 /// 旧格式：首行版本标记，之后每行 `屏名,768 个数字`。
@@ -40,6 +41,20 @@ fn backup_path() -> PathBuf {
     data_root().join("original_ramp.txt")
 }
 
+/// 读回的表和上次自己写的表，逐点允许这么大的误差。
+/// macOS 走 float、X11 会重采样，读回的值差一两个点是正常的；
+/// 真正的「被别的软件改了」通常整条曲线都不一样，差值远大于这个数。
+const RAMP_TOLERANCE: i32 = 160;
+
+/// 一次休息要等确认，不能到点就记一笔。
+#[derive(Debug, Clone, Copy)]
+pub struct RestPending {
+    /// 休息结束的时间戳
+    pub until: u64,
+    /// 要观察到至少这么长的连续空闲，才算真的停手
+    pub required_secs: u64,
+}
+
 pub struct AppState {
     pub config: Mutex<Config>,
     /// 改屏之前拍下的原始表。退出或异常时需要它把屏幕还回去
@@ -47,6 +62,12 @@ pub struct AppState {
     /// 休息提示截止的时间戳。有值且还没到期时，写屏走「休息色」
     pub rest_until: Mutex<Option<u64>>,
     pub stats: Mutex<Stats>,
+    /// 每块屏最近一次由我们写进去的表。用来发现别人动过 Gamma 表。
+    pub last_written: Mutex<HashMap<String, Ramp>>,
+    /// 检测到冲突后记下屏 id，写屏整轮暂停，等用户点「重新接管」。
+    pub gamma_conflict: Mutex<Option<String>>,
+    /// 休息结束前不急着记 breaks，等确认用户真的停手了再记。
+    pub rest_pending: Mutex<Option<RestPending>>,
 }
 
 impl AppState {
@@ -67,6 +88,9 @@ impl AppState {
             saved: Mutex::new(Vec::new()),
             rest_until: Mutex::new(None),
             stats: Mutex::new(Stats::load(&data_root())),
+            last_written: Mutex::new(HashMap::new()),
+            gamma_conflict: Mutex::new(None),
+            rest_pending: Mutex::new(None),
         };
 
         // 上次如果不是干净退出，先把屏幕救回来
@@ -278,8 +302,91 @@ fn rest_tint(tint: Tint, brightness: f64) -> (Tint, f64) {
     )
 }
 
+/// 读回的表和上次自己写的是不是同一条。
+/// 只抽 16 个点比对，够发现「被别的软件整条改掉」，又不会被转换误差误伤。
+fn ramps_close(actual: &Ramp, expected: &Ramp) -> bool {
+    if !actual.is_valid() || !expected.is_valid() {
+        return true;
+    }
+    let scaled = actual.resample(expected.len);
+    let step = (scaled.len / 16).max(1);
+    for ch in 0..3 {
+        let a = scaled.channel(ch);
+        let b = expected.channel(ch);
+        for i in (0..scaled.len).step_by(step) {
+            if (a[i] as i32 - b[i] as i32).abs() > RAMP_TOLERANCE {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// 别人（f.lux、Night Shift、显卡驱动、系统自身）动过 Gamma 表时，
+/// 不默默写回去打架。暂停整轮写屏，把冲突交给界面说明。
+fn detect_conflict(state: &AppState, displays: &[gamma::DisplayInfo]) -> bool {
+    let written = state.last_written.lock().unwrap();
+    for display in displays {
+        // HDR 开启时系统本来就会绕过 GDI 表，读回不一致属于预期，不算冲突
+        if display.hdr == Some(true) {
+            continue;
+        }
+        let Some(expected) = written.get(&display.id) else {
+            continue;
+        };
+        if let Some(actual) = gamma::read_ramp(&display.id) {
+            if !ramps_close(&actual, expected) {
+                *state.gamma_conflict.lock().unwrap() = Some(display.id.clone());
+                crate::protocol::log_line(
+                    &data_root(),
+                    &format!("gamma conflict on {}，暂停写屏等用户接管", display.id),
+                );
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub fn gamma_conflict_id(state: &AppState) -> Option<String> {
+    state.gamma_conflict.lock().unwrap().clone()
+}
+
+/// 「重新接管」：清掉冲突标记和基线，下一轮重新写一次。
+pub fn resume_gamma(state: &AppState) {
+    *state.gamma_conflict.lock().unwrap() = None;
+    state.last_written.lock().unwrap().clear();
+}
+
+/// 休息结束后结算：只有这段时间确实没碰键鼠，才记一次「休息了」。
+///
+/// 判据用 `idle_secs`：它是从最后一次输入算起的连续秒数，休息期间只要
+/// 动过鼠标就会被清零，结束时自然小于要求的时长。平台查不到空闲时
+/// 退回旧行为，宁可多记一次，也不要让人少收到提醒。
+pub fn settle_rest(state: &AppState, now: u64, idle_secs: Option<u64>, real_rest: bool) -> bool {
+    let pending = {
+        let guard = state.rest_pending.lock().unwrap();
+        let Some(item) = *guard else { return false };
+        if now < item.until {
+            return false;
+        }
+        item
+    };
+
+    let confirmed = match (real_rest, idle_secs) {
+        (true, Some(idle)) => idle >= pending.required_secs.saturating_mul(80) / 100,
+        _ => true,
+    };
+
+    *state.rest_pending.lock().unwrap() = None;
+    if confirmed {
+        state.stats.lock().unwrap().took_break();
+    }
+    confirmed
+}
+
 /// 把当前配置写到屏幕上。
-/// 目标是单块屏时，其它屏写回原始值，避免出现「只改了一块、其它还留着上次的颜色」。
+/// 每块屏各算各的：没参与的、单独关掉的，都写回原始值。
 pub fn apply_now(state: &AppState, cfg: &Config) {
     let displays = gamma::list();
     if displays.is_empty() {
@@ -295,6 +402,15 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
         return;
     }
 
+    // 关闭护眼时必须能还原屏幕，不能被冲突标记挡住。
+    // 顺手清掉基线，重新打开时当作全新一轮写屏。
+    if !cfg.enabled {
+        *state.gamma_conflict.lock().unwrap() = None;
+        state.last_written.lock().unwrap().clear();
+    } else if gamma_conflict_id(state).is_some() || detect_conflict(state, &displays) {
+        return;
+    }
+
     // 配置里的 target 可能指向另一台机器的屏，或者已经拔掉的屏。
     // 匹配不上就当全部处理，否则用户看到的是「开关是开的，但屏幕没变」。
     let target_all = cfg.target == "all" || !displays.iter().any(|d| d.id == cfg.target);
@@ -305,54 +421,58 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
         );
     }
 
-    let saved = state.saved.lock().unwrap();
-
-    let Some(mut tint) = resolve(cfg, &Moment::now()) else {
-        for display in &displays {
-            let base = saved
-                .iter()
-                .find(|(id, _)| id == &display.id)
-                .map(|(_, ramp)| ramp);
-            let ramp = baseline_for(base);
-            let ok = gamma::write_ramp(&display.id, &ramp);
-            crate::protocol::log_line(
-                &data_root(),
-                &format!("restore {} ok={ok} peak={}", display.id, ramp.peak(0)),
-            );
-        }
-        return;
-    };
-
-    let mut brightness = cfg.brightness.clamp(0.1, 1.0);
+    let moment = Moment::now();
     let resting = rest_active(state);
-    if resting {
-        let (next_tint, next_brightness) = rest_tint(tint, brightness);
-        tint = next_tint;
-        brightness = next_brightness;
-    }
+    let saved = state.saved.lock().unwrap();
+    let mut written = state.last_written.lock().unwrap();
 
-    for display in displays {
-        let targeted = target_all || cfg.target == display.id;
-        if targeted {
-            let ramp = match tint {
-                Tint::Kelvin { kelvin } => build_gamma_ramp(kelvin, brightness),
-                Tint::Rgb { rgb } => build_gamma_ramp_rgb(rgb, brightness),
-            };
-            // 算法固定产出 256 个点，目标平台需要多长由 gamma 层去重采样
-            let ramp = Ramp::from_flat(&ramp).unwrap_or_else(|| Ramp::identity(256));
-            let ok = gamma::write_ramp(&display.id, &ramp);
-            crate::protocol::log_line(
-                &data_root(),
-                &format!(
-                    "apply {} tint={tint:?} ok={ok} resting={resting} peak={} len={}",
-                    display.id,
-                    ramp.peak(0),
-                    ramp.len
-                ),
-            );
-        } else if let Some((_, original)) = saved.iter().find(|(id, _)| id == &display.id) {
-            gamma::write_ramp(&display.id, &baseline_for(Some(original)));
+    for display in &displays {
+        let screen: ScreenConfig = cfg.screen_for(&display.id);
+        let participating = target_all || cfg.target == display.id;
+
+        let tint = if participating {
+            resolve_for(cfg, &screen, &moment)
+        } else {
+            None
+        };
+        let mut brightness = cfg.brightness_for(&screen);
+        let tint = tint.map(|base| {
+            if resting {
+                let (t, b) = rest_tint(base, brightness);
+                brightness = b;
+                t
+            } else {
+                base
+            }
+        });
+
+        let flat: Vec<u16> = match tint {
+            Some(Tint::Kelvin { kelvin }) => build_gamma_ramp(kelvin, brightness).to_vec(),
+            Some(Tint::Rgb { rgb }) => build_gamma_ramp_rgb(rgb, brightness).to_vec(),
+            None => baseline_for(
+                saved
+                    .iter()
+                    .find(|(id, _)| id == &display.id)
+                    .map(|(_, ramp)| ramp),
+            )
+            .to_flat(),
+        };
+        // 算法固定产出 256 个点，目标平台需要多长由 gamma 层去重采样
+        let ramp = Ramp::from_flat(&flat).unwrap_or_else(|| Ramp::identity(256));
+        let ok = gamma::write_ramp(&display.id, &ramp);
+        if ok {
+            written.insert(display.id.clone(), ramp.clone());
         }
+        crate::protocol::log_line(
+            &data_root(),
+            &format!(
+                "apply {} tint={tint:?} ok={ok} resting={resting} peak={} len={} screen={:?}",
+                display.id,
+                ramp.peak(0),
+                ramp.len,
+                screen.mode
+            ),
+        );
     }
 }
 
@@ -461,5 +581,63 @@ mod tests {
             Tint::Kelvin { kelvin } => assert_eq!(kelvin, REST_FALLBACK_KELVIN),
             other => panic!("实际 {other:?}"),
         }
+    }
+
+    #[test]
+    fn 转换带来的小误差不算抢桌() {
+        let expected = Ramp::identity(256);
+        let mut actual = expected.clone();
+        actual.b[100] = actual.b[100].saturating_add(3);
+        assert!(ramps_close(&actual, &expected));
+    }
+
+    #[test]
+    fn 整条曲线被改过会被识别为冲突() {
+        let expected = Ramp::identity(256);
+        let mut actual = expected.clone();
+        for v in actual.b.iter_mut() {
+            *v = (*v as u32 / 2) as u16;
+        }
+        assert!(!ramps_close(&actual, &expected));
+    }
+
+    fn test_state() -> AppState {
+        AppState {
+            config: Mutex::new(Config::default()),
+            saved: Mutex::new(Vec::new()),
+            rest_until: Mutex::new(None),
+            stats: Mutex::new(Stats::default()),
+            last_written: Mutex::new(HashMap::new()),
+            gamma_conflict: Mutex::new(None),
+            rest_pending: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn 休息期间还在用电脑就不记这次休息() {
+        let state = test_state();
+        *state.rest_pending.lock().unwrap() = Some(RestPending { until: 100, required_secs: 20 });
+
+        assert!(!settle_rest(&state, 90, Some(10), true), "没到结束时间不结算");
+        assert!(!settle_rest(&state, 100, Some(2), true), "还在动键鼠");
+        assert_eq!(state.stats.lock().unwrap().view().today.breaks, 0);
+    }
+
+    #[test]
+    fn 确实停手了才记一次休息() {
+        let state = test_state();
+        *state.rest_pending.lock().unwrap() = Some(RestPending { until: 100, required_secs: 20 });
+
+        assert!(settle_rest(&state, 100, Some(20), true));
+        assert_eq!(state.stats.lock().unwrap().view().today.breaks, 1);
+        assert!(!settle_rest(&state, 200, Some(30), true), "一次休息只记一笔");
+    }
+
+    #[test]
+    fn 平台查不到空闲时按旧行为记休息() {
+        let state = test_state();
+        *state.rest_pending.lock().unwrap() = Some(RestPending { until: 100, required_secs: 20 });
+        assert!(settle_rest(&state, 100, None, true));
+        assert_eq!(state.stats.lock().unwrap().view().today.breaks, 1);
     }
 }

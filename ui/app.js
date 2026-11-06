@@ -18,6 +18,8 @@ const CTOP = 14;
 const CBOT = 116;
 const KMIN = 1000;
 const KMAX = 6500;
+const MAX_ANCHORS = 12;
+const MIN_ANCHORS = 1;
 
 const BUILTIN_PRESETS = [
   { id: "off", name: "原色", kelvin: 6500, color: null, swatch: "#d7e2f4" },
@@ -43,6 +45,10 @@ let dragging = null;
 
 let careRemain = 0;
 let bannerLeft = 0;
+/** 上次跟后端对表的时间。空闲暂停时后端会把到期时间往后推，
+    本地倒计时要以这次对表的结果为准，不能自己一路减到零。 */
+let clockBase = Date.now();
+let breakBannerShown = false;
 
 /* ------------------------------------------------------------------ 小工具 */
 
@@ -130,13 +136,36 @@ function mockHost() {
       ],
       weekendPoints: [],
     },
-    breakPlan: { enabled: true, workMinutes: 20, restSeconds: 20, dimScreen: true, dueAt: Date.now() + 20 * 60000 },
+    breakPlan: {
+      enabled: true,
+      workMinutes: 20,
+      restSeconds: 20,
+      dimScreen: true,
+      dimSeconds: 6,
+      dueAt: Date.now() + 20 * 60000,
+    },
     customPresets: [],
+    screens: [],
+    presence: { idleAware: true, fullscreenPause: true, realRest: true, presentationUntil: 0 },
+    insightEnabled: false,
   };
 
-  const displays = [{ id: "mock-1", name: "演示屏幕", width: 1920, height: 1080, primary: true, hdr: false }];
+  const displays = [
+    { id: "mock-1", name: "主屏", width: 1920, height: 1080, primary: true, hdr: false },
+    { id: "mock-2", name: "副屏", width: 2560, height: 1440, primary: false, hdr: false },
+  ];
   const listeners = new Set();
-  let days = {};
+
+  // 造五天带钟点分布的记录，让用眼建议在演示后端里也能看到真实结论
+  const days = {};
+  for (let back = 1; back <= 5; back++) {
+    const key = new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+    const hours = Array(24).fill(0);
+    hours[21] = 2400;
+    hours[22] = 2100;
+    hours[10] = 1200;
+    days[key] = { seconds: 5700, breaks: 3, longestStreakSeconds: 4200, hours };
+  }
 
   const presets = () => [
     ...BUILTIN_PRESETS.map((p) => ({ ...p, hint: "", custom: false })),
@@ -163,6 +192,40 @@ function mockHost() {
   const SUNRISE = 402;
   const SUNSET = 1083;
 
+  const DEFAULT_FILTER = [250, 235, 210];
+
+  const screenList = () =>
+    displays.map((d) => {
+      const s = cfg.screens.find((x) => x.id === d.id) || {
+        id: d.id,
+        enabled: true,
+        mode: "follow",
+        kelvin: cfg.kelvin,
+        brightness: cfg.brightness,
+        color: cfg.color || DEFAULT_FILTER,
+      };
+      const eff = effective();
+      const tint = !s.enabled
+        ? null
+        : s.mode === "custom"
+          ? { kind: "kelvin", kelvin: s.kelvin }
+          : s.mode === "filter"
+            ? { kind: "rgb", rgb: s.color || cfg.color || DEFAULT_FILTER }
+            : eff;
+      return {
+        ...s,
+        name: d.name,
+        hdr: d.hdr,
+        color: s.color || cfg.color || DEFAULT_FILTER,
+        effectiveKelvin: tint?.kind === "kelvin" ? tint.kelvin : null,
+        effectiveRgb: tint?.kind === "rgb" ? tint.rgb : null,
+        effectiveKind: tint?.kind || "none",
+      };
+    });
+
+  const INSIGHT_SUMMARY =
+    "最近 5 天，21:00–23:00 平均每小时看了 38 分钟，是一天里最密的一段。可以在这里加一个更暖的锚点。";
+
   // 和后端 sun_points 一样：日出前后各留 40 分钟过渡，中间保持白天色温
   const sunPoints = () => [
     { at: SUNRISE - 40, kelvin: cfg.schedule.nightKelvin },
@@ -180,6 +243,7 @@ function mockHost() {
     target: cfg.target,
     presets: presets(),
     displays,
+    screens: screenList(),
     effective: effective(),
     schedule: {
       ...cfg.schedule,
@@ -191,11 +255,34 @@ function mockHost() {
       workMinutes: cfg.breakPlan.workMinutes,
       restSeconds: cfg.breakPlan.restSeconds,
       dimScreen: cfg.breakPlan.dimScreen,
+      dimSeconds: cfg.breakPlan.dimSeconds,
       remainingSeconds: cfg.breakPlan.enabled
         ? Math.max(0, Math.round((cfg.breakPlan.dueAt - Date.now()) / 1000))
         : null,
       resting: false,
     },
+    presence: {
+      idleAware: cfg.presence.idleAware,
+      fullscreenPause: cfg.presence.fullscreenPause,
+      realRest: cfg.presence.realRest,
+      presentationUntil: Math.round(cfg.presence.presentationUntil),
+      presentationLeftSeconds: Math.max(0, Math.round(cfg.presence.presentationUntil - Date.now() / 1000)),
+      idleSeconds: 3,
+      idleSupported: true,
+      fullscreen: false,
+      away: false,
+      pausedReason: "",
+      note: "只读取距上次键鼠输入的秒数，不记录按键内容、不读窗口标题、不联网。",
+    },
+    insight: {
+      enabled: cfg.insightEnabled,
+      summary: cfg.insightEnabled ? INSIGHT_SUMMARY : "",
+      at: 21 * 60 + 30,
+      kelvin: 3500,
+      canApply: cfg.insightEnabled,
+      days: 5,
+    },
+    gammaConflict: null,
     stats: {
       today: days.today || { seconds: 0, breaks: 0, longestStreakSeconds: 0 },
       streakSeconds: 0,
@@ -289,11 +376,59 @@ function mockHost() {
           cfg.breakPlan.dueAt = Date.now() + params.workMinutes * 60000;
         }
         if (typeof params.dimScreen === "boolean") cfg.breakPlan.dimScreen = params.dimScreen;
+        if (typeof params.dimSeconds === "number") {
+          cfg.breakPlan.dimSeconds = Math.min(60, Math.max(2, params.dimSeconds));
+        }
         if (params.action === "skip") {
           cfg.breakPlan.dueAt = Date.now() + cfg.breakPlan.workMinutes * 60000;
         }
         return payload();
       }
+
+      if (method === "eyecare/screen") {
+        const id = params.id;
+        const cur = cfg.screens.find((x) => x.id === id) || {
+          id,
+          enabled: true,
+          mode: "follow",
+          kelvin: cfg.kelvin,
+          brightness: cfg.brightness,
+          color: cfg.color || DEFAULT_FILTER,
+        };
+        const next = { ...cur };
+        if (typeof params.enabled === "boolean") next.enabled = params.enabled;
+        if (params.mode) next.mode = params.mode;
+        if (typeof params.kelvin === "number") next.kelvin = params.kelvin;
+        if (typeof params.brightness === "number") next.brightness = params.brightness;
+        if (params.color !== undefined) next.color = params.color;
+        if (next.mode === "filter" && !next.color) next.color = cfg.color || DEFAULT_FILTER;
+        cfg.screens = [...cfg.screens.filter((x) => x.id !== id), next];
+        return payload();
+      }
+
+      if (method === "eyecare/presence") {
+        if (typeof params.idleAware === "boolean") cfg.presence.idleAware = params.idleAware;
+        if (typeof params.fullscreenPause === "boolean") cfg.presence.fullscreenPause = params.fullscreenPause;
+        if (typeof params.realRest === "boolean") cfg.presence.realRest = params.realRest;
+        if (typeof params.presentationMinutes === "number") {
+          cfg.presence.presentationUntil = params.presentationMinutes
+            ? Date.now() / 1000 + params.presentationMinutes * 60
+            : 0;
+        }
+        return payload();
+      }
+
+      if (method === "eyecare/insight") {
+        if (typeof params.enabled === "boolean") cfg.insightEnabled = params.enabled;
+        if (params.action === "apply" && cfg.insightEnabled) {
+          cfg.schedule.points.push({ at: 21 * 60 + 30, kelvin: 3500 });
+          cfg.schedule.points.sort((a, b) => a.at - b.at);
+          // 不替用户打开「按时间自动」，那个开关留给用户自己点
+        }
+        return payload();
+      }
+
+      if (method === "eyecare/gamma.resume") return payload();
 
       throw new Error(`mock 没有实现 ${method}`);
     },
@@ -347,7 +482,7 @@ function editPoints() {
   return draftPoints || basePoints();
 }
 
-function commitPoints(points) {
+async function commitPoints(points) {
   if (!S || S.schedule.mode === "sun") return;
   const sorted = [...points]
     .map((p) => ({
@@ -357,10 +492,12 @@ function commitPoints(points) {
     .sort((a, b) => a.at - b.at);
 
   if (editingDay === "weekend") {
-    send("eyecare/config", { schedule: { weekendPoints: sorted } });
+    await send("eyecare/config", { schedule: { weekendPoints: sorted } });
   } else {
-    send("eyecare/config", { schedule: { points: sorted } });
+    await send("eyecare/config", { schedule: { points: sorted } });
   }
+  draftPoints = null;
+  render();
 }
 
 /* ------------------------------------------------------------------ 渲染 */
@@ -428,17 +565,24 @@ function render() {
 
   setSwitch("breakOn", !!S.break.enabled);
   setSwitch("dimScreen", !!S.break.dimScreen);
+  el("dimSeconds").value = S.break.dimSeconds;
+  el("dimSeconds").disabled = !S.break.dimScreen;
   el("workMinutes").value = S.break.workMinutes;
 
   renderSupportNote();
   renderTarget();
   renderPresets();
   renderHdrNote();
+  renderConflict();
+  renderScreens();
+  renderPresence();
+  renderInsight();
   renderModeSeg();
   renderCurve();
   syncAnchorInputs();
   renderDayNote();
   renderStats();
+  renderSunCountdown();
 }
 
 function renderModeSeg() {
@@ -450,10 +594,14 @@ function renderModeSeg() {
   el("daySeg").classList.toggle("disabled", isSun);
   el("anchorTime").disabled = isSun;
   el("anchorK").disabled = isSun;
+  const points = editPoints();
+  el("anchorAdd").disabled = isSun || points.length >= MAX_ANCHORS;
+  el("anchorDel").disabled = isSun || points.length <= MIN_ANCHORS;
+  el("anchorCount").textContent = `${points.length}/${MAX_ANCHORS}`;
   if (isSun) {
-    el("anchorHint").textContent = "日出日落模式下，时刻由太阳决定";
+    el("anchorHint").textContent = "日出日落模式下，时刻由太阳决定，锚点不能增删";
   } else {
-    el("anchorHint").textContent = "点曲线上的圆点选中，拖动可改时间和色温";
+    el("anchorHint").textContent = "点曲线上的圆点选中，拖动可改时间和色温；最多 12 个锚点";
   }
 }
 
@@ -476,8 +624,8 @@ function renderSupportNote() {
 /// 这个必须提前说清楚，否则用户会以为是插件坏了。
 function renderHdrNote() {
   const note = el("hdrNote");
-  const affected = (S.displays || []).filter(
-    (d) => (S.target === "all" || S.target === d.id) && d.hdr === true
+  const affected = (S.screens || []).filter(
+    (s) => s.enabled && (S.target === "all" || S.target === s.id) && s.hdr === true
   );
 
   if (affected.length === 0 || !S.enabled) {
@@ -775,6 +923,47 @@ function onDragUp() {
   commitPoints(points);
 }
 
+/** 在选中点和它下一个点之间插一个锚点；已经是最后一个时往后推三小时。 */
+function addAnchor() {
+  if (!S || S.schedule.mode === "sun") return;
+  const points = editPoints().map((p) => ({ ...p }));
+  if (points.length >= MAX_ANCHORS) return;
+
+  const index = Math.min(selectedAnchor, points.length - 1);
+  const cur = points[index] || { at: 720, kelvin: 4500 };
+  const next = points[index + 1];
+  const at = next
+    ? clamp(Math.round((cur.at + next.at) / 2 / 5) * 5, 0, 1439)
+    : (cur.at + 180) % 1440;
+  const kelvin = clamp(
+    Math.round((cur.kelvin + (next?.kelvin ?? cur.kelvin)) / 2 / 50) * 50,
+    KMIN,
+    KMAX
+  );
+
+  points.push({ at, kelvin });
+  const sorted = points.sort((a, b) => a.at - b.at);
+  const placed = sorted.findIndex((p) => p.at === at && p.kelvin === kelvin);
+  selectedAnchor = placed >= 0 ? placed : 0;
+  draftPoints = sorted;
+  renderCurve();
+  syncAnchorInputs();
+  commitPoints(sorted);
+}
+
+function removeAnchor() {
+  if (!S || S.schedule.mode === "sun") return;
+  const points = editPoints().map((p) => ({ ...p }));
+  if (points.length <= MIN_ANCHORS) return;
+
+  points.splice(Math.min(selectedAnchor, points.length - 1), 1);
+  selectedAnchor = Math.max(0, Math.min(selectedAnchor, points.length - 1));
+  draftPoints = points;
+  renderCurve();
+  syncAnchorInputs();
+  commitPoints(points);
+}
+
 /* ------------------------------------------------------------------ 统计 */
 
 function renderStats() {
@@ -832,6 +1021,232 @@ function renderStats() {
   });
 }
 
+/* ---------------------------------------------------- 0.2.0：逐屏、免打扰、建议 */
+
+function setSwitchNode(node, on) {
+  node.classList.toggle("on", on);
+  node.setAttribute("aria-checked", String(on));
+}
+
+function renderConflict() {
+  const note = el("conflictNote");
+  const id = S.gammaConflict;
+  if (!id) {
+    note.classList.add("hidden");
+    return;
+  }
+  const screen = (S.screens || []).find((x) => x.id === id);
+  el("conflictText").textContent =
+    `检测到「${screen?.name || id}」的 Gamma 表被其它程序改动，Eye眼已暂停写屏，避免互相覆盖。`;
+  note.classList.remove("hidden");
+}
+
+let screenRowsKey = "";
+const screenRowRefs = new Map();
+
+function renderScreens() {
+  const list = S.screens || [];
+  const key = list.map((s) => `${s.id}:${s.mode}`).join("|");
+  const wrap = el("screenRows");
+
+  // 只在屏幕增减或模式变化时重建 DOM，否则输入到一半会被 15 秒一次的状态刷新打断
+  if (key !== screenRowsKey) {
+    screenRowsKey = key;
+    screenRowRefs.clear();
+    wrap.innerHTML = "";
+
+    for (const item of list) {
+      const id = item.id;
+      const row = document.createElement("div");
+      row.className = "screen-row";
+
+      const name = document.createElement("div");
+      name.className = "screen-name";
+      name.textContent = item.name || id;
+      const state = document.createElement("small");
+
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "switch";
+      toggle.title = "这块屏是否参与调整";
+      toggle.appendChild(Object.assign(document.createElement("span"), { className: "knob" }));
+
+      const mode = document.createElement("select");
+      mode.innerHTML =
+        '<option value="follow">跟随</option><option value="custom">独立</option><option value="filter">滤色</option>';
+      mode.title = "跟随全局 / 用自己的色温 / 用自己的滤色";
+
+      // 色温和滤色共用一个格子：模式不同，显示不同的输入控件
+      const value = document.createElement("div");
+      value.className = "screen-value";
+      const kelvin = document.createElement("input");
+      kelvin.type = "number";
+      kelvin.min = KMIN;
+      kelvin.max = KMAX;
+      kelvin.step = 50;
+      kelvin.title = "独立时使用的色温 K";
+      const color = document.createElement("input");
+      color.type = "color";
+      color.title = "这块屏使用的滤色";
+      value.append(kelvin, color);
+
+      const brightness = document.createElement("input");
+      brightness.type = "number";
+      brightness.min = 10;
+      brightness.max = 100;
+      brightness.step = 1;
+      brightness.title = "独立或滤色时使用的亮度 %";
+
+      const effective = document.createElement("span");
+      effective.className = "muted";
+
+      row.append(name, toggle, mode, value, brightness, effective);
+      name.appendChild(state);
+      wrap.appendChild(row);
+
+      const current = () => (S.screens || []).find((x) => x.id === id) || item;
+      toggle.addEventListener("click", () =>
+        send("eyecare/screen", { id, enabled: !current().enabled })
+      );
+      mode.addEventListener("change", () => send("eyecare/screen", { id, mode: mode.value }));
+      kelvin.addEventListener("change", () =>
+        send("eyecare/screen", { id, kelvin: clamp(Number(kelvin.value) || KMAX, KMIN, KMAX) })
+      );
+      color.addEventListener("change", () => {
+        const hex = color.value.replace("#", "");
+        const rgb = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+        send("eyecare/screen", { id, color: rgb });
+      });
+      brightness.addEventListener("change", () =>
+        send("eyecare/screen", {
+          id,
+          brightness: clamp(Number(brightness.value) || 100, 10, 100) / 100,
+        })
+      );
+
+      screenRowRefs.set(id, {
+        row, name, state, toggle, mode, kelvin, color, brightness, effective,
+      });
+    }
+  }
+
+  for (const item of list) {
+    const ref = screenRowRefs.get(item.id);
+    if (!ref) continue;
+    const own = item.mode !== "follow";
+    const filter = item.mode === "filter";
+    const rgb = item.color || [250, 235, 210];
+
+    setSwitchNode(ref.toggle, !!item.enabled);
+    ref.mode.value = item.mode;
+    ref.kelvin.value = Math.round(item.kelvin);
+    ref.color.value = rgbToHex(rgb);
+    ref.brightness.value = Math.round(item.brightness * 100);
+    ref.kelvin.classList.toggle("hidden", filter);
+    ref.color.classList.toggle("hidden", !filter);
+    ref.kelvin.disabled = !own || filter;
+    ref.color.disabled = !filter;
+    ref.brightness.disabled = !own;
+    ref.row.classList.toggle("off", !item.enabled);
+    ref.state.textContent = !item.enabled
+      ? "保持原色"
+      : filter
+        ? "用自己的滤色"
+        : own
+          ? "独立设置"
+          : "跟随全局";
+
+    ref.effective.textContent = "";
+    if (!item.enabled) {
+      ref.effective.textContent = "—";
+    } else if (item.effectiveKind === "rgb" || item.effectiveRgb) {
+      const dot = document.createElement("span");
+      dot.className = "screen-dot";
+      dot.style.background = rgbToHex(item.effectiveRgb || rgb);
+      ref.effective.append(dot, document.createTextNode("滤色"));
+    } else if (item.effectiveKelvin) {
+      ref.effective.textContent = `${item.effectiveKelvin}K`;
+    } else {
+      ref.effective.textContent = "—";
+    }
+  }
+
+  el("screenHint").textContent = `${list.length} 块屏`;
+}
+
+function renderPresence() {
+  const p = S.presence || {};
+  setSwitch("idleAware", !!p.idleAware);
+  setSwitch("fullscreenPause", !!p.fullscreenPause);
+  setSwitch("realRest", !!p.realRest);
+
+  const left = p.presentationLeftSeconds || 0;
+  el("presentation").textContent =
+    left > 0 ? `演示中 · 剩 ${Math.ceil(left / 60)} 分（点此结束）` : "暂停 60 分钟";
+
+  const notes = [];
+  if (!p.idleSupported) {
+    notes.push("当前平台查不到输入空闲，「人离开时暂停」不会生效，其余照常。");
+  }
+  if (p.away && p.pausedReason) notes.push(`已暂停：${p.pausedReason}。`);
+  if (p.note) notes.push(p.note);
+  el("presenceNote").textContent = notes.join(" ");
+}
+
+function renderInsight() {
+  const i = S.insight || {};
+  setSwitch("insightOn", !!i.enabled);
+  let text = i.enabled
+    ? i.summary || "还在攒带时段的用眼记录。"
+    : "默认关闭。打开后只分析本机记录，不会自动改配置。";
+  // 应用建议只加锚点，不替用户打开自动；这里把「还要自己点一下」说清楚
+  if (i.enabled && i.canApply && !S.schedule?.enabled) {
+    text += " 应用后要到曲线卡片自己打开「按时间自动」，锚点才会生效。";
+  }
+  el("insightText").textContent = text;
+
+  const btn = el("insightApply");
+  btn.classList.toggle("hidden", !(i.enabled && i.canApply));
+  btn.textContent = i.at ? `在 ${fmtTime(i.at)} 加 ${i.kelvin}K 锚点` : "应用建议";
+}
+
+/** 找今天下一个比当前色温更暖的锚点，算出还有多久。 */
+function nextWarmAnchor() {
+  const s = S.schedule || {};
+  const points = (s.effectivePoints || s.points || []).slice().sort((a, b) => a.at - b.at);
+  if (!s.enabled || points.length < 2) return null;
+
+  const now = minutesNow();
+  const current = sampleKelvin(points, now, s.transition || 0);
+  const ordered = [...points.filter((p) => p.at > now), ...points.filter((p) => p.at <= now)];
+  const found = ordered.find((p) => p.kelvin <= current - 150);
+  if (!found) return null;
+  return { at: found.at, minutes: (found.at - now + 1440) % 1440 };
+}
+
+function renderSunCountdown() {
+  const node = el("sunCountdown");
+  if (!S || !S.schedule) {
+    node.textContent = "";
+    return;
+  }
+  if (!S.schedule.enabled) {
+    node.textContent = "开启「按时间自动」后，这里会倒数到下次转暖";
+    return;
+  }
+
+  const next = nextWarmAnchor();
+  if (!next) {
+    const sunset = S.schedule.sunTimes?.sunset;
+    node.textContent = sunset ? `当地日落 ${fmtTime(sunset)}` : "";
+    return;
+  }
+  const hours = Math.floor(next.minutes / 60);
+  const minutes = Math.floor(next.minutes % 60);
+  const what = S.schedule.mode === "sun" ? "日落转暖" : "转暖";
+  node.textContent = `距 ${fmtTime(next.at)} ${what}还有 ${hours > 0 ? `${hours} 小时 ` : ""}${minutes} 分`;
+}
+
 /* ---------------------------------------------------------------- 倒计时 */
 
 function updateClock() {
@@ -842,19 +1257,24 @@ function updateClock() {
     el("breakTime").textContent = "--:--";
     el("breakBar").style.width = "0%";
     el("breakCap").textContent = "提醒已关闭";
+    renderSunCountdown();
     return;
   }
 
-  careRemain = Math.max(0, careRemain - 1);
+  // remainingSeconds 是后端给的，减去对表之后过去的秒数。
+  // 后端暂停计时时会把它往后推，下一次对表自然就跟上了。
+  const elapsed = Math.floor((Date.now() - clockBase) / 1000);
+  careRemain = Math.max(0, Math.round((plan.remainingSeconds ?? 0) - elapsed));
   el("breakTime").textContent = fmtClock(careRemain);
   el("breakCap").textContent = S.break.resting ? "正在休息" : "后提醒休息";
 
   const total = Math.max(1, plan.workMinutes * 60);
   el("breakBar").style.width = `${Math.min(100, (careRemain / total) * 100)}%`;
+  renderSunCountdown();
 
-  if (careRemain === 0) {
+  if (careRemain === 0 && !breakBannerShown) {
+    breakBannerShown = true;
     showBanner(plan.restSeconds || 20);
-    careRemain = plan.workMinutes * 60;
   }
 }
 
@@ -870,6 +1290,83 @@ function showBanner(seconds) {
 function debounce(fn) {
   clearTimeout(pushTimer);
   pushTimer = setTimeout(fn, 120);
+}
+
+/* ------------------------------------------------------- 使用说明书弹框 */
+/* 说明整篇在 index.html 里，这里只负责开关和跳转，不请求任何外部内容。 */
+
+let helpLastFocus = null;
+
+function helpOpen() {
+  return !el("helpOverlay").classList.contains("hidden");
+}
+
+function openHelp() {
+  helpLastFocus = document.activeElement;
+  el("helpOverlay").classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  // 每次都从第一页开始。目录跳转要平滑，但「回到顶部」不要，
+  // 否则重开时会看到正文从上次的滚动位置一路滚回来。
+  const body = el("helpBody");
+  body.style.scrollBehavior = "auto";
+  body.scrollTop = 0;
+  requestAnimationFrame(() => { body.style.scrollBehavior = ""; });
+  el("helpDialog").focus();
+}
+
+function closeHelp() {
+  el("helpOverlay").classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  // 用脚本触发打开时 activeElement 可能是 body，此时固定回到首页按钮
+  const back =
+    helpLastFocus && helpLastFocus !== document.body && helpLastFocus.focus
+      ? helpLastFocus
+      : el("helpBtn");
+  back.focus();
+}
+
+function bindHelp() {
+  el("helpBtn").addEventListener("click", openHelp);
+  el("helpClose").addEventListener("click", closeHelp);
+  el("helpBottomClose").addEventListener("click", closeHelp);
+
+  el("helpOverlay").addEventListener("click", (e) => {
+    // 点在遮罩上才关；点在弹框里（包括选中文字）不关
+    if (e.target === el("helpOverlay")) {
+      closeHelp();
+      return;
+    }
+    // 章节导航不用 a[href=#]，免得把沙箱 iframe 的地址也改了
+    const jump = e.target.closest("button[data-jump]");
+    if (!jump) return;
+    const section = el(jump.dataset.jump);
+    if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!helpOpen()) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeHelp();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    // 焦点锁在弹框里，别 Tab 到遮罩后面那层面板上
+    const focusable = Array.from(
+      el("helpDialog").querySelectorAll("button:not([disabled])")
+    );
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || active === el("helpDialog"))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 }
 
 function bind() {
@@ -979,6 +1476,7 @@ function bind() {
     setSwitch("breakOn", next);
     await send("eyecare/break", { enabled: next });
     careRemain = S.break.remainingSeconds ?? 0;
+    clockBase = Date.now();
   });
 
   el("dimScreen").addEventListener("click", async () => {
@@ -987,14 +1485,22 @@ function bind() {
     await send("eyecare/break", { dimScreen: next });
   });
 
+  el("dimSeconds").addEventListener("change", async (e) => {
+    const seconds = Math.min(60, Math.max(2, Number(e.target.value) || 0));
+    await send("eyecare/break", { dimSeconds: seconds });
+  });
+
   el("workMinutes").addEventListener("change", async (e) => {
     await send("eyecare/break", { workMinutes: Number(e.target.value) });
     careRemain = S.break.remainingSeconds ?? 0;
+    clockBase = Date.now();
   });
 
   el("skip").addEventListener("click", async () => {
     await send("eyecare/break", { action: "skip" });
     careRemain = S.break.remainingSeconds ?? 0;
+    clockBase = Date.now();
+    breakBannerShown = false;
     el("banner").classList.add("hidden");
     el("breakCap").textContent = "后提醒休息";
   });
@@ -1003,6 +1509,35 @@ function bind() {
     el("banner").classList.add("hidden");
     el("breakCap").textContent = "后提醒休息";
   });
+
+  el("gammaResume").addEventListener("click", () => send("eyecare/gamma.resume"));
+
+  el("idleAware").addEventListener("click", () =>
+    send("eyecare/presence", { idleAware: !S.presence.idleAware })
+  );
+  el("fullscreenPause").addEventListener("click", () =>
+    send("eyecare/presence", { fullscreenPause: !S.presence.fullscreenPause })
+  );
+  el("realRest").addEventListener("click", () =>
+    send("eyecare/presence", { realRest: !S.presence.realRest })
+  );
+  el("presentation").addEventListener("click", () =>
+    send("eyecare/presence", {
+      presentationMinutes: (S.presence.presentationLeftSeconds || 0) > 0 ? 0 : 60,
+    })
+  );
+
+  el("insightOn").addEventListener("click", () =>
+    send("eyecare/insight", { enabled: !S.insight.enabled })
+  );
+  el("insightApply").addEventListener("click", () =>
+    send("eyecare/insight", { action: "apply" })
+  );
+
+  el("anchorAdd").addEventListener("click", addAnchor);
+  el("anchorDel").addEventListener("click", removeAnchor);
+
+  bindHelp();
 }
 
 /* ---------------------------------------------------------------- 启动 */
@@ -1069,6 +1604,7 @@ async function boot() {
 
   S = await api.invoke("eyecare/state");
   careRemain = S.break.remainingSeconds ?? 0;
+  clockBase = Date.now();
   bind();
   render();
 
@@ -1076,16 +1612,24 @@ async function boot() {
     const method = event?.method || event?.event;
     const params = event?.params || event?.data || {};
     if (method === "evt/break.due") {
+      breakBannerShown = false;
       showBanner(params.restSeconds || S.break.restSeconds || 20);
-      careRemain = S.break.workMinutes * 60;
+    }
+    if (method === "evt/gamma.conflict") {
+      api.invoke("eyecare/state").then((next) => {
+        S = next;
+        render();
+      }).catch(() => {});
     }
   });
 
-  // 每秒跑一次倒计时，每 15 秒跟后端对一次表（后台可能已经重新计时）
+  // 每秒跑一次倒计时，每 15 秒跟后端对一次表（后台可能已经重新计时或暂停）
   setInterval(updateClock, 1000);
   setInterval(async () => {
     try {
       S = await api.invoke("eyecare/state");
+      clockBase = Date.now();
+      breakBannerShown = false;
       render();
     } catch {
       // 宿主正在重启侧车时会短暂失败，下一轮自然恢复

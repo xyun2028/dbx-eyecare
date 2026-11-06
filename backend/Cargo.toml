@@ -18,9 +18,14 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
     "Win32_UI_ColorSystem",
     "Win32_Devices_Display",
+    # 空闲检测（GetLastInputInfo / GetTickCount64）与前台全屏窗口判定
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_SystemInformation",
 ] }
 
 # 纯 Rust 的 X11 实现，不链接 libX11/libXrandr。
 # 这样交叉编译 linux-arm64 时不需要目标平台的开发包头文件。
+# screensaver 扩展只用来读「距上次输入多少毫秒」，不启动屏保、不改系统设置。
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = { version = "0.14", default-features = false, features = ["randr"] }
+x11rb = { version = "0.14", default-features = false, features = ["randr", "screensaver"] }
