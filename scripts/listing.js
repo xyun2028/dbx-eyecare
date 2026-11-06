@@ -50,7 +50,7 @@ function buildCandidate({ manifest, store, artifacts, repo, rawBase, tag }) {
     permissions: manifest.permissions,
     source: `${repo}/tree/${tag}`,
     homepage: store.homepage || manifest.homepage,
-    license: store.license || "MIT",
+    license: store.license || "Apache-2.0",
     releaseNotes: store.releaseNotes || "",
     localizations: store.localizations || {},
     targets: sortTargets(artifacts),
