@@ -46,6 +46,16 @@ fn backup_path() -> PathBuf {
 /// 真正的「被别的软件改了」通常整条曲线都不一样，差值远大于这个数。
 const RAMP_TOLERANCE: i32 = 160;
 
+/// 同一块屏两次写表的最小间隔。后台循环 5 秒一拍，不节流的话一小时 720 次，
+/// 一部分核显驱动会因此轻微抖动，日志也会跟着写爆。
+///
+/// 20 秒在曲线过渡期大约对应不到 10K 的色温变化，肉眼看不出台阶；
+/// 平台期则完全不重复写。
+const MIN_WRITE_SECS: u64 = 20;
+/// 目标表一直没变，也隔这么久重写一次。兜住那些读回检查发现不了的漂移
+/// （把 Gamma 表悄悄改回去又不触发整条曲线差异的情况）。
+const IDLE_REWRITE_SECS: u64 = 300;
+
 /// 一次休息要等确认，不能到点就记一笔。
 #[derive(Debug, Clone, Copy)]
 pub struct RestPending {
@@ -68,6 +78,11 @@ pub struct AppState {
     pub gamma_conflict: Mutex<Option<String>>,
     /// 休息结束前不急着记 breaks，等确认用户真的停手了再记。
     pub rest_pending: Mutex<Option<RestPending>>,
+    /// 上次真正写屏的时刻，给后台循环的写屏节流用。
+    pub last_apply_at: Mutex<u64>,
+    /// 上次写屏时屏幕是不是在「休息压暗」状态。
+    /// 这个状态只有几秒宽，切换必须立刻生效，不能被节流挡住。
+    pub last_resting: Mutex<bool>,
 }
 
 impl AppState {
@@ -91,6 +106,8 @@ impl AppState {
             last_written: Mutex::new(HashMap::new()),
             gamma_conflict: Mutex::new(None),
             rest_pending: Mutex::new(None),
+            last_apply_at: Mutex::new(0),
+            last_resting: Mutex::new(false),
         };
 
         // 上次如果不是干净退出，先把屏幕救回来
@@ -385,9 +402,42 @@ pub fn settle_rest(state: &AppState, now: u64, idle_secs: Option<u64>, real_rest
     confirmed
 }
 
-/// 把当前配置写到屏幕上。
+/// 把当前配置写到屏幕上，立刻生效。
+///
+/// 用户改配置、启动首帧、休息压暗的开始与结束都走这条，不受后台节流影响。
 /// 每块屏各算各的：没参与的、单独关掉的，都写回原始值。
 pub fn apply_now(state: &AppState, cfg: &Config) {
+    apply_inner(state, cfg, true);
+}
+
+/// 后台循环专用的写屏入口。
+///
+/// 和 `apply_now` 的唯一区别是「允许跳过」：目标表和上次写进去的一样、
+/// 或者离上次写屏还不够久，就不写。以前每 5 秒无条件重设一次 LUT，
+/// 曲线在平台期根本没变，屏幕却被反复改，日志也跟着写爆。
+pub fn apply_tick(state: &AppState, cfg: &Config) {
+    apply_inner(state, cfg, false);
+}
+
+/// 这一次要不要真的写屏。
+///
+/// - `force`：用户操作、休息状态切换，一律写
+/// - 距上次写屏不到 `MIN_WRITE_SECS`：跳过，避免过渡期每拍都写
+/// - 目标表和上次一致：只有隔了 `IDLE_REWRITE_SECS` 才保底重写
+fn should_write(prev: Option<&Ramp>, next: &Ramp, since_last: u64, force: bool) -> bool {
+    if force {
+        return true;
+    }
+    if since_last < MIN_WRITE_SECS {
+        return false;
+    }
+    if prev != Some(next) {
+        return true;
+    }
+    since_last >= IDLE_REWRITE_SECS
+}
+
+fn apply_inner(state: &AppState, cfg: &Config, force: bool) {
     let displays = gamma::list();
     if displays.is_empty() {
         let support = gamma::capability();
@@ -404,9 +454,12 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
 
     // 关闭护眼时必须能还原屏幕，不能被冲突标记挡住。
     // 顺手清掉基线，重新打开时当作全新一轮写屏。
+    // 还原本身也不受节流限制：用户点了关闭，屏幕就该马上回来。
+    let mut force = force;
     if !cfg.enabled {
         *state.gamma_conflict.lock().unwrap() = None;
         state.last_written.lock().unwrap().clear();
+        force = true;
     } else if gamma_conflict_id(state).is_some() || detect_conflict(state, &displays) {
         return;
     }
@@ -421,10 +474,25 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
         );
     }
 
+    let now = model::now_secs();
     let moment = Moment::now();
     let resting = rest_active(state);
+
+    // 压暗窗口只有几秒宽，开始和结束都必须越过节流立刻落到屏幕上，
+    // 否则那条提醒会被节流整个吞掉，用户什么都看不到
+    let rest_changed = {
+        let mut guard = state.last_resting.lock().unwrap();
+        let changed = *guard != resting;
+        *guard = resting;
+        changed
+    };
+    let force = force || rest_changed;
+
+    let since_last = now.saturating_sub(*state.last_apply_at.lock().unwrap());
+
     let saved = state.saved.lock().unwrap();
     let mut written = state.last_written.lock().unwrap();
+    let mut wrote_any = false;
 
     for display in &displays {
         let screen: ScreenConfig = cfg.screen_for(&display.id);
@@ -459,9 +527,21 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
         };
         // 算法固定产出 256 个点，目标平台需要多长由 gamma 层去重采样
         let ramp = Ramp::from_flat(&flat).unwrap_or_else(|| Ramp::identity(256));
+
+        // 目标没变就不写。这一条同时解决两件事：不再每 5 秒重设一次 LUT，
+        // 也不会再每拍写一行日志——那行日志以前一天能滚出几万条。
+        let needed = {
+            let prev = written.get(&display.id);
+            should_write(prev, &ramp, since_last, force)
+        };
+        if !needed {
+            continue;
+        }
+
         let ok = gamma::write_ramp(&display.id, &ramp);
         if ok {
             written.insert(display.id.clone(), ramp.clone());
+            wrote_any = true;
         }
         crate::protocol::log_line(
             &data_root(),
@@ -473,6 +553,14 @@ pub fn apply_now(state: &AppState, cfg: &Config) {
                 screen.mode
             ),
         );
+    }
+
+    drop(written);
+
+    // 只有真的写了才推进节流时间。一直没写时 since_last 会继续增长，
+    // 最终触发上面那条保底重写
+    if wrote_any {
+        *state.last_apply_at.lock().unwrap() = now;
     }
 }
 
@@ -610,7 +698,49 @@ mod tests {
             last_written: Mutex::new(HashMap::new()),
             gamma_conflict: Mutex::new(None),
             rest_pending: Mutex::new(None),
+            last_apply_at: Mutex::new(0),
+            last_resting: Mutex::new(false),
         }
+    }
+
+    #[test]
+    fn 目标表没变且不到保底时间就不写() {
+        let ramp = Ramp::identity(256);
+        assert!(!should_write(
+            Some(&ramp),
+            &ramp,
+            IDLE_REWRITE_SECS - 1,
+            false
+        ));
+        assert!(
+            should_write(Some(&ramp), &ramp, IDLE_REWRITE_SECS, false),
+            "隔够时间要保底重写一次"
+        );
+    }
+
+    #[test]
+    fn 目标表变了才写() {
+        let old = Ramp::identity(256);
+        let mut next = Ramp::identity(256);
+        next.b[200] = next.b[200].saturating_sub(1000);
+
+        assert!(should_write(Some(&old), &next, MIN_WRITE_SECS, false));
+        assert!(
+            !should_write(Some(&old), &next, MIN_WRITE_SECS - 1, false),
+            "过渡期也要守住最小间隔，不然还是每拍都写"
+        );
+    }
+
+    #[test]
+    fn 用户操作不受节流限制() {
+        let ramp = Ramp::identity(256);
+        assert!(should_write(Some(&ramp), &ramp, 0, true));
+    }
+
+    #[test]
+    fn 第一次写屏不会被判成重复() {
+        let ramp = Ramp::identity(256);
+        assert!(should_write(None, &ramp, MIN_WRITE_SECS, false));
     }
 
     #[test]

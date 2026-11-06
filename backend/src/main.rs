@@ -22,8 +22,8 @@ use serde_json::{json, Value};
 
 use crate::protocol::{emit_error, emit_event, emit_result, log_line, SharedWriter};
 use crate::state::{
-    apply_now, begin_rest, clear_backup, data_root, gamma_conflict_id, restore_all, settle_rest,
-    AppState, RestPending,
+    apply_now, apply_tick, begin_rest, clear_backup, data_root, gamma_conflict_id, restore_all,
+    settle_rest, AppState, RestPending,
 };
 
 /// 后台循环的间隔。改屏、计时、统计都按这个粒度推进。
@@ -122,7 +122,9 @@ fn main() {
             let cfg = state.config();
 
             if cfg.enabled && !pause_writing {
-                apply_now(&state, &cfg);
+                // 后台循环走节流版本：目标表没变就不重复写 Gamma 表，
+                // 曲线的缓慢过渡也压到 20 秒一次，屏幕上看不出台阶
+                apply_tick(&state, &cfg);
             }
 
             let conflict = gamma_conflict_id(&state);
