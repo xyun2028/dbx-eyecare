@@ -234,8 +234,8 @@ node scripts/package.js
 产物在 `dist/`：
 
 ```
-com.eyecare.dbx-0.2.0-windows-x64.dbxp              # 安装包
-com.eyecare.dbx-0.2.0-windows-x64.artifact.json     # target / url / sha256 / size
+com.eyecare.dbx-0.2.1-windows-x64.dbxp              # 安装包
+com.eyecare.dbx-0.2.1-windows-x64.artifact.json     # target / url / sha256 / size
 release-candidates.json                             # 挂到 Release，供商店同步流程读取
 candidates/com.eyecare.dbx.json                     # 提给 dbx-store 的候选文件
 publishers/xyun2028.json                            # 提给 dbx-store 的发布者记录
@@ -305,7 +305,7 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
 
 ## 已验证 / 未验证
 
-**验证过的（0.2.0 开发树，含本轮改动）：**
+**验证过的（0.2.1 开发树，含本轮改动）：**
 
 - Windows 实机：握手返回 `protocolVersion` / `capabilities` / `plugin.id+version`
 - Windows 实机：`eyecare/state` 读出两块 1920×1080 显示器、HDR 状态、7 个预设
@@ -345,8 +345,8 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
   关掉重开立刻回到顶部、Esc / 点遮罩 / 两个关闭按钮、点弹框内部不关闭、
   Tab 焦点锁在弹框内、关闭后焦点回到首页按钮；浅色、深色、600px 窄屏三套截图
   检查过，正文可选中复制，没有横向溢出和控制台报错
-- 打包：本轮重新出了 Windows 包 `dist/com.eyecare.dbx-0.2.0-windows-x64.dbxp`
-  （901144 字节，SHA-256 `944a22fd1712487ac502bff7513807604fe809c7ac8917e26c38fe98ff94569a`）。
+- 打包：本轮重新出了 Windows 包 `dist/com.eyecare.dbx-0.2.1-windows-x64.dbxp`
+  （900979 字节，SHA-256 `cbf444e94cab8085f8c73d2358992d0ac760386093425c350a283afd5b38fe1e`）。
   包内 `backend.executable` 指向 `bin/windows-x64/`，`manifest.json` 权限仍是
   `host.workbench` + `host.events`；解开包直接跑里面的 exe 验证过握手、
   `screens` / `presence` / `insight` / `gammaConflict` 字段、逐屏滤色模式和
