@@ -346,7 +346,7 @@ sha256 长度、产物大小上限），两份上架文件格式不同，所以�
   Tab 焦点锁在弹框内、关闭后焦点回到首页按钮；浅色、深色、600px 窄屏三套截图
   检查过，正文可选中复制，没有横向溢出和控制台报错
 - 打包：本轮重新出了 Windows 包 `dist/com.eyecare.dbx-0.2.0-windows-x64.dbxp`
-  （899124 字节，SHA-256 `5c17fe3c74ad55ea0d39d79d32b36908df697081052af3e9bd74de3a4a3d469d`）。
+  （901144 字节，SHA-256 `944a22fd1712487ac502bff7513807604fe809c7ac8917e26c38fe98ff94569a`）。
   包内 `backend.executable` 指向 `bin/windows-x64/`，`manifest.json` 权限仍是
   `host.workbench` + `host.events`；解开包直接跑里面的 exe 验证过握手、
   `screens` / `presence` / `insight` / `gammaConflict` 字段、逐屏滤色模式和
